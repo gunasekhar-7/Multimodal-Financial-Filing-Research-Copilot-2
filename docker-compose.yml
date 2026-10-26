@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  financial-copilot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: financial_research_copilot
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped

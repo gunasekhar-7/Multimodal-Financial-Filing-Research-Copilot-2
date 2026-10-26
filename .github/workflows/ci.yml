@@ -1,0 +1,50 @@
+name: CI/CD Pipeline & Evaluation Gates
+
+on:
+  push:
+    branches: [ main, master, "jules-*" ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test-and-eval:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Seed Database
+        run: |
+          PYTHONPATH=. python scripts/seed_database.py
+
+      - name: Run Unit & Integration Tests
+        run: |
+          PYTHONPATH=. pytest --cov=src --cov-report=term-missing tests/
+
+      - name: Run Benchmark Evaluation
+        run: |
+          PYTHONPATH=. python scripts/run_eval.py
+
+      - name: Check Evaluation Quality Gates
+        run: |
+          python -c "
+          import json, sys
+          with open('eval_results.json') as f:
+              res = json.load(f)
+          print('Loaded benchmark results:', res)
+          assert res['recall_at_k'] >= 50.0, f'Recall@k too low: {res[\"recall_at_k\"]}%'
+          assert res['citation_resolution_rate_pct'] >= 90.0, f'Citation resolution rate too low: {res[\"citation_resolution_rate_pct\"]}%'
+          assert res['claim_faithfulness_rate_pct'] >= 85.0, f'Claim faithfulness too low: {res[\"claim_faithfulness_rate_pct\"]}%'
+          print('All CI evaluation quality gates PASSED!')
+          "

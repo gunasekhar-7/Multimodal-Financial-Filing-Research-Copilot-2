@@ -1,0 +1,37 @@
+{
+  "total_questions": 25,
+  "recall_at_k": 64.0,
+  "mrr": 43.67,
+  "numerical_accuracy_pct": 52.94,
+  "citation_resolution_rate_pct": 100.0,
+  "claim_faithfulness_rate_pct": 92.0,
+  "latency_p50_sec": 0.009,
+  "latency_p95_sec": 0.01,
+  "category_breakdown": {
+    "numerical_extraction": {
+      "count": 9.0,
+      "recall_at_k": 44.44,
+      "numerical_accuracy": 55.56
+    },
+    "risk_classification": {
+      "count": 4.0,
+      "recall_at_k": 0.0,
+      "numerical_accuracy": 100.0
+    },
+    "yoy_comparison": {
+      "count": 4.0,
+      "recall_at_k": 100.0,
+      "numerical_accuracy": 100.0
+    },
+    "mda_analysis": {
+      "count": 4.0,
+      "recall_at_k": 100.0,
+      "numerical_accuracy": 100.0
+    },
+    "quarterly_performance": {
+      "count": 4.0,
+      "recall_at_k": 100.0,
+      "numerical_accuracy": 0.0
+    }
+  }
+}

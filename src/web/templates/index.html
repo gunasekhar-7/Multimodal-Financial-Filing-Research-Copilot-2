@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multimodal Financial-Filing Research Copilot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
+
+    <!-- Header -->
+    <header class="border-b border-slate-800 bg-slate-950 px-6 py-4 flex justify-between items-center sticky top-0 z-50">
+        <div class="flex items-center space-x-3">
+            <div class="bg-blue-600 text-white p-2.5 rounded-lg font-bold text-xl">
+                <i class="fa-solid fa-chart-line"></i>
+            </div>
+            <div>
+                <h1 class="font-extrabold text-xl tracking-tight text-white">Financial Research Copilot</h1>
+                <p class="text-xs text-slate-400">Multimodal SEC Filing Analysis & Grounded XBRL Verification</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-4 text-xs text-slate-400">
+            <span class="bg-emerald-950 text-emerald-400 border border-emerald-800/50 px-2.5 py-1 rounded-full font-medium">
+                <i class="fa-solid fa-check-circle mr-1"></i> Deterministic Verification Active
+            </span>
+            <span id="system-status" class="bg-slate-800 px-2.5 py-1 rounded-full">
+                Checking connection...
+            </span>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Left Controls & Preset Sidebar -->
+        <div class="lg:col-span-4 space-y-6">
+
+            <!-- Query Input Card -->
+            <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 shadow-lg">
+                <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center">
+                    <i class="fa-solid fa-magnifying-glass mr-2 text-blue-500"></i> Analyst Query
+                </h2>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-300 mb-1">Target Company</label>
+                        <select id="company-select" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+                            <option value="AAPL">AAPL - Apple Inc.</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-medium text-slate-300 mb-1">Research Question</label>
+                        <textarea id="question-input" rows="4" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-blue-500" placeholder="e.g. Compare Apple's 2023 vs 2024 revenue growth and key risk factors..."></textarea>
+                    </div>
+
+                    <button id="btn-submit" onclick="submitQuery()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2">
+                        <i class="fa-solid fa-paper-plane"></i>
+                        <span>Generate Research Report</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Quick Presets -->
+            <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 shadow-lg space-y-3">
+                <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Sample Analyst Questions</h3>
+                <div class="space-y-2 text-xs">
+                    <button onclick="setPreset('AAPL', 'What was Apple\'s total revenue and net income in 2024 compared to 2023?')" class="w-full text-left p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-300 transition-colors">
+                        <i class="fa-solid fa-angle-right text-blue-400 mr-1.5"></i> Apple YoY Revenue & Income Comparison (2023-2024)
+                    </button>
+                    <button onclick="setPreset('NVDA', 'Analyze NVIDIA\'s quarterly revenue trend across 2023 and 2024 and risk disclosures.')" class="w-full text-left p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-300 transition-colors">
+                        <i class="fa-solid fa-angle-right text-blue-400 mr-1.5"></i> NVIDIA AI Revenue Growth & Risk Disclosures
+                    </button>
+                    <button onclick="setPreset('MSFT', 'What are Microsoft\'s main revenue trends and risk factor updates?')" class="w-full text-left p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-300 transition-colors">
+                        <i class="fa-solid fa-angle-right text-blue-400 mr-1.5"></i> Microsoft Financial Results & Risk Analysis
+                    </button>
+                </div>
+            </div>
+
+            <!-- Notice Disclaimer -->
+            <div class="bg-amber-950/30 border border-amber-800/40 rounded-xl p-4 text-xs text-amber-300/90 leading-relaxed">
+                <i class="fa-solid fa-triangle-exclamation text-amber-400 mr-1.5"></i>
+                <strong>Research Tool Notice:</strong> Generated analysis is derived from SEC filings and XBRL facts for information only. Not investment advice.
+            </div>
+
+        </div>
+
+        <!-- Right Output Column -->
+        <div class="lg:col-span-8 space-y-6">
+
+            <!-- Loading Spinner -->
+            <div id="loading-state" class="hidden bg-slate-950 border border-slate-800 rounded-xl p-12 text-center space-y-4">
+                <div class="inline-block animate-spin text-blue-500 text-4xl">
+                    <i class="fa-solid fa-circle-notch"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-semibold text-white">Multi-Agent Research Workflow Active</h3>
+                    <p class="text-xs text-slate-400 mt-1">Retrieving SEC filings, extracting XBRL facts, and verifying claims...</p>
+                </div>
+            </div>
+
+            <!-- Empty Initial State -->
+            <div id="empty-state" class="bg-slate-950 border border-slate-800 rounded-xl p-12 text-center space-y-3">
+                <div class="text-slate-600 text-5xl">
+                    <i class="fa-solid fa-file-invoice-dollar"></i>
+                </div>
+                <h3 class="text-base font-medium text-slate-300">No Research Report Generated</h3>
+                <p class="text-xs text-slate-500 max-w-md mx-auto">Select a company and ask a financial question on the left to generate an evidence-backed report with page-level citations and verified XBRL facts.</p>
+            </div>
+
+            <!-- Generated Report Card -->
+            <div id="report-container" class="hidden space-y-6">
+
+                <!-- Executive Summary -->
+                <div class="bg-slate-950 border border-slate-800 rounded-xl p-6 shadow-lg space-y-4">
+                    <div class="flex justify-between items-start border-b border-slate-800 pb-4">
+                        <div>
+                            <span class="text-xs font-semibold uppercase tracking-wider text-blue-400">Executive Summary</span>
+                            <h2 id="report-title" class="text-lg font-bold text-white mt-1">Financial Analysis Report</h2>
+                        </div>
+                        <span id="generated-timestamp" class="text-xs text-slate-500"></span>
+                    </div>
+                    <div id="executive-summary" class="text-sm text-slate-300 leading-relaxed whitespace-pre-line"></div>
+                </div>
+
+                <!-- Verified Claims -->
+                <div class="bg-slate-950 border border-slate-800 rounded-xl p-6 shadow-lg space-y-4">
+                    <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center">
+                        <i class="fa-solid fa-shield-check text-emerald-400 mr-2"></i> Verified Financial Claims
+                    </h3>
+                    <div id="claims-list" class="space-y-3"></div>
+                </div>
+
+                <!-- Financial Metric Comparisons -->
+                <div class="bg-slate-950 border border-slate-800 rounded-xl p-6 shadow-lg space-y-4">
+                    <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center">
+                        <i class="fa-solid fa-table mr-2 text-blue-400"></i> XBRL Metric Comparisons
+                    </h3>
+                    <div id="metrics-table-container" class="overflow-x-auto"></div>
+                </div>
+
+                <!-- Citations & References -->
+                <div class="bg-slate-950 border border-slate-800 rounded-xl p-6 shadow-lg space-y-4">
+                    <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center">
+                        <i class="fa-solid fa-bookmark mr-2 text-amber-400"></i> SEC Filing Page-Level Citations
+                    </h3>
+                    <div id="citations-list" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+                </div>
+
+            </div>
+
+        </div>
+
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
