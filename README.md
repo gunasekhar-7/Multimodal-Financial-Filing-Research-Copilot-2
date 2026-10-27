@@ -6,7 +6,7 @@ A production-style, multi-agent AI research platform that analyzes public-compan
 
 ## Key Features
 
-- **25 Public Companies & 8 Quarters Coverage**: Ingests and normalizes financial filings and XBRL facts for 25 technology sector public companies across 8 historical quarters (2023-Q1 through 2024-FY).
+- **10 Public Companies & 8 Quarters Coverage (demonstration corpus)**: Ingests and normalizes financial filings and XBRL facts for 10 technology sector public companies across 8 historical quarters (2023-Q1 through 2024-FY). The corpus is a seeded demonstration dataset — the architecture supports replacing it with a real SEC EDGAR ingestion pipeline.
 - **Hybrid Retrieval Engine**: Combines SQLite FTS5 BM25 full-text search with dense vector embeddings using Reciprocal Rank Fusion (RRF) and Cross-Encoder heuristic reranking.
 - **Custom Multi-Agent Orchestration**: Modular, typed Pydantic agent framework consisting of:
   - **Planner Agent**: Parses research questions into structured execution steps.
@@ -15,8 +15,8 @@ A production-style, multi-agent AI research platform that analyzes public-compan
   - **Financial Analysis Agent**: Classifies material risk factor disclosures (Item 1A) and MD&A trends (Item 7).
   - **Verification Agent**: Deterministically cross-checks claims against XBRL ground truth with delta percentage calculations.
   - **Report Writer Agent**: Generates structured markdown research reports with clickable page citations and uncertainty disclosures.
-- **Evaluation Benchmark Suite**: Includes a 150-question curated golden dataset measuring Recall@k, MRR, numerical accuracy, citation resolution rate, claim faithfulness, and p50/p95 latency.
-- **Production-Style Web Interface & REST API**: Interactive Tailwind CSS financial analyst dashboard with company selectors, sample questions, metric comparison tables, and verification badges.
+- **Evaluation Benchmark Suite**: Includes a golden dataset (generated from the seeded corpus) measuring Recall@k, MRR, numerical accuracy, citation resolution rate, claim faithfulness, and p50/p95 latency. Numbers below reflect the seeded corpus, not a live SEC EDGAR ingestion.
+- **Production-Style Web Interface & REST API**: Interactive Tailwind CSS financial analyst dashboard with company selectors, sample questions, metric comparison tables, and verification badges. Note: verification badges reflect the crawler's own claim-verification logic against the indexed corpus, not an independent audit of SEC filings.
 - **CI/CD Quality Gates**: Automated GitHub Actions workflow testing unit coverage (96%) and evaluation benchmark thresholds.
 
 ---
@@ -103,7 +103,7 @@ A production-style, multi-agent AI research platform that analyzes public-compan
 
 ## Evaluation Benchmark Results
 
-Evaluated on 150 curated financial research questions:
+Evaluated on the golden dataset derived from the seeded corpus:
 
 | Metric | Measured Score | Target Threshold |
 | :--- | :--- | :--- |

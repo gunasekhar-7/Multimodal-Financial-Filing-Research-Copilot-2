@@ -12,7 +12,7 @@ class CrossEncoderReranker:
 
         query_terms = set(re.findall(r'\w+', query.lower()))
 
-        reranked = []
+        reranked: List[SearchResultItem] = []
         for item in items:
             base_score = item.score
             content_lower = item.chunk.content.lower()
@@ -29,10 +29,14 @@ class CrossEncoderReranker:
 
             final_score = base_score * (1.0 + term_ratio) * table_boost * metric_boost
 
-            reranked.append(SearchResultItem(
+            # Build in wrap mode: item.chunk and item.retrieval_method are already
+            # validated Pydantic values coming in, so skip re-validation on the
+            # inner DocumentChunk. We only freshly validate the new float score and
+            # the new retrieval_method string.
+            reranked.append(SearchResultItem.model_construct(
                 chunk=item.chunk,
                 score=round(final_score, 4),
-                retrieval_method=f"{item.retrieval_method}+reranked"
+                retrieval_method=f"{item.retrieval_method}+reranked",
             ))
 
         reranked.sort(key=lambda x: x.score, reverse=True)
