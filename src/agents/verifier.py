@@ -6,9 +6,12 @@ from src.schemas.reports import VerifiedClaim, ClaimVerificationStatus, Citation
 # SEC filing concepts) as opposed to a general or out-of-domain question.
 FINANCIAL_QUESTION_SIGNALS = {
     "revenue", "income", "eps", "profit", "earnings", "margin",
-    "cash", "asset", "liability", "equity", "fiscal", "quarter",
-    "filing", "disclosure", "risk", "loss", "gain", "dividend",
+    "cash", "asset", "assets", "liability", "liabilities", "equity",
+    "fiscal", "quarter", "filing", "filings", "disclosure",
+    "disclosures", "risk", "risks", "loss", "gain", "dividend", "dividends",
     "operating", "gross", "net", "balance", "liquidity", "roi",
+    "investment", "investments", "investing", "strategic", "strategy",
+    "mda", "guidance", "outlook", "segments", "expenses", "expenditure",
 }
 
 # Tokens / substrings that make a retrieved chunk legitimate financial
