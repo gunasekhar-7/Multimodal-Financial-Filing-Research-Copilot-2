@@ -62,9 +62,10 @@ class SearchQuery(BaseModel):
     fiscal_years: Optional[List[int]] = None
     fiscal_periods: Optional[List[str]] = None
     sections: Optional[List[str]] = None
-    top_k: int = 10
+    top_k: int = Field(default=10, ge=1, le=100)
 
 class SearchResultItem(BaseModel):
+    model_config = ConfigDict(extra='ignore')
     chunk: DocumentChunk
     score: float
     retrieval_method: str # e.g., "bm25", "vector", "hybrid"

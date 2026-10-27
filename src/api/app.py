@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
@@ -12,6 +13,8 @@ from src.retrieval.hybrid_search import HybridSearchEngine
 from src.agents.orchestrator import ResearchOrchestrator
 from src.schemas.financial import SearchQuery, SearchResultItem, CompanyInfo, XBRLFact
 from src.schemas.reports import ResearchReport
+from src.api.metrics import RequestMetrics
+from src.api.ratelimit import SlidingWindowRateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +26,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost", "http://localhost:3000", "http://127.0.0.1", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -32,6 +35,33 @@ app.add_middleware(
 # Global DB and Orchestrator instances
 db = DatabaseStorage(db_path="financial_copilot.db")
 orchestrator = ResearchOrchestrator(db=db)
+request_metrics = RequestMetrics()
+rate_limiter = SlidingWindowRateLimiter()
+
+# Endpoints the per-IP budget and latency tracking apply to.
+TRACKED_POST_PATHS = {"/api/query", "/api/search"}
+
+
+@app.middleware("http")
+async def rate_limit_and_track(request, call_next):
+    """429 over-budget POSTs first, then record latency for tracked paths."""
+    path = request.url.path
+    if request.method == "POST" and path in TRACKED_POST_PATHS:
+        client_ip = request.client.host if request.client else "unknown"
+        allowed, retry_after = rate_limiter.check(client_ip)
+        if not allowed:
+            logger.warning("Rate limit exceeded for %s on %s", client_ip, path)
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded. Try again later."},
+                headers={"Retry-After": str(retry_after)},
+            )
+    start = time.perf_counter()
+    response = await call_next(request)
+    request_metrics.note_request()
+    if path in TRACKED_POST_PATHS:
+        request_metrics.record(path, (time.perf_counter() - start) * 1000.0)
+    return response
 
 class ResearchRequest(BaseModel):
     question: str
@@ -45,6 +75,22 @@ def health_check():
         "companies_count": len(db.get_all_companies()),
         "xbrl_facts_count": db.get_fact_count(),
         "document_chunks_count": db.get_chunk_count()
+    }
+
+@app.get("/api/metrics")
+def get_metrics():
+    """Operational signal: uptime, request counters, p50/p95 latency, index freshness."""
+    dense = orchestrator.search_engine.dense_search
+    return {
+        "uptime_seconds": round(time.time() - request_metrics.started_at, 1),
+        "request_count": request_metrics.request_count,
+        "latency_ms": {
+            path: request_metrics.summary(path) for path in sorted(TRACKED_POST_PATHS)
+        },
+        "dense_index": {
+            "initialized": dense.doc_vectors is not None,
+            "last_refresh": orchestrator.search_engine.last_index_refresh,
+        },
     }
 
 @app.get("/api/companies", response_model=List[CompanyInfo])
