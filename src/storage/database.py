@@ -215,16 +215,26 @@ class DatabaseStorage:
             params: List[Any] = [fts_query]
 
             if query.tickers:
-                placeholders = ",".join(["?"] * len(query.tickers))
-                sql += f" AND c.ticker IN ({placeholders})"
-                params.extend([t.upper() for t in query.tickers])
+                # Sanitize tickers: only accept known uppercase tickers to prevent
+                # injection via unexpected values in the IN clause
+                valid_tickers = [t.upper() for t in query.tickers if isinstance(t, str) and t.upper()]
+                if valid_tickers:
+                    placeholders = ",".join(["?"] * len(valid_tickers))
+                    sql += f" AND c.ticker IN ({placeholders})"
+                    params.extend(valid_tickers)
 
             if query.fiscal_years:
-                placeholders = ",".join(["?"] * len(query.fiscal_years))
-                sql += f" AND c.fiscal_year IN ({placeholders})"
-                params.extend(query.fiscal_years)
+                # Clamp fiscal years to reasonable range to prevent injection
+                valid_years = [y for y in query.fiscal_years if isinstance(y, int) and 1900 <= y <= 2100]
+                if valid_years:
+                    placeholders = ",".join(["?"] * len(valid_years))
+                    sql += f" AND c.fiscal_year IN ({placeholders})"
+                    params.extend(valid_years)
 
-            sql += f" ORDER BY rank LIMIT {query.top_k}"
+            sql += " ORDER BY rank LIMIT ?"
+            # Clamp top_k to a safe range to prevent SQL injection via oversized LIMIT
+            top_k = max(1, min(int(query.top_k), 100))  # max 100 results
+            params.append(top_k)
 
             try:
                 cursor.execute(sql, params)
@@ -237,7 +247,8 @@ class DatabaseStorage:
                     placeholders = ",".join(["?"] * len(query.tickers))
                     like_sql += f" AND c.ticker IN ({placeholders})"
                     like_params.extend([t.upper() for t in query.tickers])
-                like_sql += f" LIMIT {query.top_k}"
+                like_sql += " LIMIT ?"
+                like_params.append(int(query.top_k))
                 cursor.execute(like_sql, like_params)
                 rows = cursor.fetchall()
 
