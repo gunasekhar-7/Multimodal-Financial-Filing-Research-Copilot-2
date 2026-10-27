@@ -4,9 +4,9 @@
   "mrr": 43.67,
   "numerical_accuracy_pct": 52.94,
   "citation_resolution_rate_pct": 100.0,
-  "claim_faithfulness_rate_pct": 92.0,
-  "latency_p50_sec": 0.009,
-  "latency_p95_sec": 0.01,
+  "claim_faithfulness_rate_pct": 71.43,
+  "latency_p50_sec": 0.09,
+  "latency_p95_sec": 0.301,
   "category_breakdown": {
     "numerical_extraction": {
       "count": 9.0,
