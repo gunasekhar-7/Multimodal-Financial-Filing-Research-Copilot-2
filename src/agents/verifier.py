@@ -133,6 +133,9 @@ def _select_revenue_fact(
         exact = [f for f in concept_facts if f.fiscal_year == year and f.fiscal_period == quarter]
         if exact:
             return exact[-1]
+        # An explicit quarter must not silently degrade to an annual or other
+        # quarter value; return no fact so the caller reports it as unverified.
+        return None
 
     if year is not None:
         same_year = [f for f in concept_facts if f.fiscal_year == year]
@@ -140,9 +143,15 @@ def _select_revenue_fact(
             annual = [f for f in same_year if f.fiscal_period == "FY"]
             if annual:
                 return annual[-1]
-            latest_q = max((f.fiscal_period for f in same_year), default=None)
-            if latest_q:
-                return [f for f in same_year if f.fiscal_period == latest_q][-1]
+            quarters = [f for f in same_year if re.fullmatch(r"Q[1-4]", f.fiscal_period)]
+            if quarters:
+                latest_q = max(quarters, key=lambda f: int(f.fiscal_period[1:])).fiscal_period
+                return [f for f in quarters if f.fiscal_period == latest_q][-1]
+
+    if year is not None:
+        # A request for a specific year must not return a different year's
+        # value when that year is absent from the indexed corpus.
+        return None
 
     fy2024 = [f for f in concept_facts if f.fiscal_year == 2024 and f.fiscal_period == "FY"]
     if fy2024:

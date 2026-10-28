@@ -241,3 +241,44 @@ def test_verifier_selects_requested_concept_and_period(
     assert numerical_claim.status == ClaimVerificationStatus.VERIFIED
     assert numerical_claim.numerical_value == expected.value
     assert f"{fiscal_period} {fiscal_year}" in numerical_claim.claim_text
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What was Apple's revenue in Q4 2024?",
+        "What was Apple's revenue in fiscal year 2025?",
+    ],
+)
+def test_verifier_does_not_substitute_another_period(question):
+    """Unavailable requested data must stay unverified, not borrow another period."""
+    from src.agents.verifier import VerificationAgent
+    from src.ingestion.sec_client import generate_mock_xbrl_facts
+
+    company = CompanyInfo(
+        ticker="AAPL",
+        cik="0000320193",
+        name="Apple Inc.",
+        sector=SectorType.TECHNOLOGY,
+    )
+    claims = VerificationAgent().verify_claims(
+        question, generate_mock_xbrl_facts(company), chunks=[]
+    )
+    numerical_claim = next(claim for claim in claims if claim.claim_id.startswith("claim-num-"))
+
+    assert numerical_claim.status == ClaimVerificationStatus.UNVERIFIED
+    assert numerical_claim.numerical_value is None
+
+
+def test_planner_keeps_comparison_queries_unfiltered():
+    """Comparisons need MD&A commentary, unlike single-figure lookups."""
+    from src.agents.planner import PlannerAgent
+
+    planner = PlannerAgent()
+    comparison = planner.plan(
+        "Compare year-over-year revenue growth for AAPL between 2023 and 2024."
+    )
+    lookup = planner.plan("What was AAPL revenue in fiscal year 2024?")
+
+    assert comparison.section_hints == []
+    assert lookup.section_hints == ["Item 8."]
