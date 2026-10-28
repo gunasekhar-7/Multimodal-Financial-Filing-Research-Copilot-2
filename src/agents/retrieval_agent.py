@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from src.schemas.financial import SearchQuery, SearchResultItem, XBRLFact
 from src.storage.database import DatabaseStorage
 from src.retrieval.hybrid_search import HybridSearchEngine
@@ -8,11 +8,18 @@ class RetrievalAgent:
         self.db = db
         self.search_engine = search_engine
 
-    def retrieve_chunks(self, question: str, tickers: List[str], top_k: int = 10) -> List[SearchResultItem]:
+    def retrieve_chunks(
+        self,
+        question: str,
+        tickers: List[str],
+        top_k: int = 10,
+        sections: Optional[List[str]] = None,
+    ) -> List[SearchResultItem]:
         query = SearchQuery(
             query=question,
             tickers=tickers,
-            top_k=top_k
+            top_k=top_k,
+            sections=sections or None,
         )
         return self.search_engine.search(query)
 

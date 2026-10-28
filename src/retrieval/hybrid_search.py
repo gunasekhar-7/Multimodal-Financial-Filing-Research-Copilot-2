@@ -89,10 +89,24 @@ class HybridSearchEngine:
                 )
             return chunks
 
+    CANDIDATE_MULTIPLIER = 3
+    MIN_CANDIDATES = 25
+
     def search(self, query: SearchQuery) -> List[SearchResultItem]:
+        """Hybrid retrieval: BM25 + dense, RRF fusion, heuristic rerank.
+
+        Candidate retrieval deliberately over-fetches (candidate_k =
+        parallel channels x) before fusion because fusion only sees what its
+        input channels return: a relevant table chunk pushed to rank 12 in
+        BM25 would otherwise be invisible to the reranker regardless of how
+        good its boost is. Only the FINAL top_k (the caller's request, used
+        by the reranker) is narrowed back down to the requested size.
+        """
         self.ensure_index()
-        bm25_res = self.db.search_bm25(query)
-        dense_res = self.dense_search.search(query)
+        candidate_k = max(self.MIN_CANDIDATES, query.top_k * self.CANDIDATE_MULTIPLIER)
+        candidate_query = query.model_copy(update={"top_k": candidate_k})
+        bm25_res = self.db.search_bm25(candidate_query)
+        dense_res = self.dense_search.search(candidate_query)
 
         fused_res = reciprocal_rank_fusion(bm25_res, dense_res)
         final_reranked = self.reranker.rerank(
