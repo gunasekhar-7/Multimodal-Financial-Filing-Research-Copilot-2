@@ -9,6 +9,9 @@ class ResearchPlan(BaseModel):
     required_periods: List[str]
     sub_tasks: List[str]
     search_queries: List[str]
+    # Filing-section prefixes (e.g. "Item 8.") the retrieval layer should
+    # prioritize for this question. Empty for qualitative questions.
+    section_hints: List[str] = []
 
 class AgentState(BaseModel):
     model_config = ConfigDict(extra='ignore')

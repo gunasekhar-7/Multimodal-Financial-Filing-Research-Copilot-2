@@ -2,6 +2,7 @@ import sqlite3
 import json
 import logging
 import math
+import re
 from typing import List, Dict, Any, Optional, Tuple
 from src.schemas.financial import CompanyInfo, XBRLFact, DocumentChunk, SearchQuery, SearchResultItem, FilingType
 from src.ingestion.companies import TARGET_COMPANIES
@@ -199,12 +200,18 @@ class DatabaseStorage:
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
-            # Clean search terms for FTS5
-            terms = [t for t in query.query.replace('"', ' ').replace("'", ' ').split() if len(t) > 2]
-            if not terms:
+            # Sanitize search terms into plain alphanumeric tokens for FTS5.
+            # Punctuation such as '?' is a syntax error inside an FTS5 MATCH
+            # expression, and leaving it in made every question ending in a
+            # question mark silently degrade to the unranked LIKE fallback.
+            # Tokens longer than 3 chars become prefix queries so "revenue"
+            # also matches the indexed "Revenues:" (FTS5 does not stem), which
+            # is how the financial-statement chunks carry their figures.
+            tokens = [t.lower() for t in re.findall(r"[A-Za-z0-9]+", query.query) if len(t) > 2]
+            if not tokens:
                 fts_query = query.query
             else:
-                fts_query = " OR ".join(terms)
+                fts_query = " OR ".join(t + "*" if len(t) > 3 else t for t in tokens)
 
             sql = """
                 SELECT c.*, fts.rank
@@ -231,6 +238,20 @@ class DatabaseStorage:
                     sql += f" AND c.fiscal_year IN ({placeholders})"
                     params.extend(valid_years)
 
+            if query.sections:
+                # Section hints are trusted planner output used as exact
+                # string prefixes (e.g. "Item 8."), matched as filter
+                # parameters — never interpolated into SQL.
+                like_clauses = []
+                like_params: List[Any] = []
+                for section in query.sections:
+                    if isinstance(section, str) and section.strip():
+                        like_clauses.append("c.item_section LIKE ?")
+                        like_params.append(section.replace("%", "") + "%")
+                if like_clauses:
+                    sql += " AND (" + " OR ".join(like_clauses) + ")"
+                    params.extend(like_params)
+
             sql += " ORDER BY rank LIMIT ?"
             # Clamp top_k to a safe range to prevent SQL injection via oversized LIMIT
             top_k = max(1, min(int(query.top_k), 100))  # max 100 results
@@ -247,6 +268,14 @@ class DatabaseStorage:
                     placeholders = ",".join(["?"] * len(query.tickers))
                     like_sql += f" AND c.ticker IN ({placeholders})"
                     like_params.extend([t.upper() for t in query.tickers])
+                if query.sections:
+                    like_clauses = []
+                    for section in query.sections:
+                        if isinstance(section, str) and section.strip():
+                            like_clauses.append("item_section LIKE ?")
+                            like_params.append(section.replace("%", "") + "%")
+                    if like_clauses:
+                        like_sql += " AND (" + " OR ".join(like_clauses) + ")"
                 like_sql += " LIMIT ?"
                 like_params.append(int(query.top_k))
                 cursor.execute(like_sql, like_params)

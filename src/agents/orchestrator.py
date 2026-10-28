@@ -37,7 +37,9 @@ class ResearchOrchestrator:
         logger.info("Plan generated for question %r: tickers=%s", question, plan.tickers)
 
         # Step 2: Retrieval
-        chunks = self.retrieval_agent.retrieve_chunks(question, state.tickers, top_k=10)
+        chunks = self.retrieval_agent.retrieve_chunks(
+            question, state.tickers, top_k=10, sections=plan.section_hints
+        )
         facts = self.retrieval_agent.retrieve_facts(state.tickers)
         state.retrieved_chunks = chunks
         state.retrieved_facts = facts
