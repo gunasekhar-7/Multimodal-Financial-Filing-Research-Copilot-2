@@ -1,5 +1,5 @@
 import re
-from typing import List, Optional
+from typing import List
 from src.schemas.agents import ResearchPlan
 from src.schemas.financial import CompanyInfo
 from src.ingestion.companies import TARGET_COMPANIES
@@ -8,7 +8,11 @@ from src.ingestion.companies import TARGET_COMPANIES
 # filing sections that carry those figures as primary data (the consolidated
 # statements, Item 8), not just narrative mentions of the metric.
 NUMERIC_METRIC_SIGNALS = re.compile(
-    r"\b(revenue|income|eps|profit|margin|earnings|cash|growth|yoy)\b",
+    r"\b(revenue|income|eps|profit|margin|earnings|cash)\b",
+    re.IGNORECASE,
+)
+COMPARISON_SIGNALS = re.compile(
+    r"\b(compare|comparison|growth|trend|yoy)\b|year[- ]over[- ]year",
     re.IGNORECASE,
 )
 
@@ -25,10 +29,15 @@ QUALITATIVE_SIGNALS = re.compile(
 def classify_question(question: str) -> str:
     """Coarse intent classification used by the planner.
 
-    Returns 'numerical' when the question asks for a quantitative figure and
-    carries no qualitative framing, 'mixed'/'qualitative' otherwise.
+    Returns 'numerical' only for a single-metric lookup. Comparisons and
+    qualitative questions keep broad section coverage.
     """
-    if NUMERIC_METRIC_SIGNALS.search(question or "") and not QUALITATIVE_SIGNALS.search(question or ""):
+    text = question or ""
+    if (
+        NUMERIC_METRIC_SIGNALS.search(text)
+        and not QUALITATIVE_SIGNALS.search(text)
+        and not COMPARISON_SIGNALS.search(text)
+    ):
         return "numerical"
     return "qualitative"
 
@@ -59,8 +68,8 @@ class PlannerAgent:
             "Generate structured research report with citations",
         ]
 
-        # The retrieval layer prioritizes the filing sections that carry the
-        # figures as primary data only for purely numerical questions.
+        # The retrieval layer narrows to Item 8 only for single-metric
+        # lookups; comparisons need Item 7 commentary as evidence.
         section_hints: List[str] = []
         if classify_question(question) == "numerical":
             section_hints = ["Item 8."]
