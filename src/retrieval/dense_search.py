@@ -25,13 +25,19 @@ class DenseVectorSearch:
 
         # Filter by tickers if specified
         results: List[SearchResultItem] = []
+        ticker_filter = [t.upper() for t in query.tickers] if query.tickers else None
+        section_filter = [s.lower() for s in query.sections if isinstance(s, str) and s.strip()] if query.sections else None
         for idx, sim in enumerate(similarities):
             chunk = self.chunks[idx]
-            if query.tickers and chunk.ticker.upper() not in [t.upper() for t in query.tickers]:
+            if ticker_filter and chunk.ticker.upper() not in ticker_filter:
                 continue
             if query.fiscal_years and chunk.fiscal_year not in query.fiscal_years:
                 continue
             if query.fiscal_periods and chunk.fiscal_period not in query.fiscal_periods:
+                continue
+            if section_filter and not any(
+                chunk.item_section.lower().startswith(prefix) for prefix in section_filter
+            ):
                 continue
             if sim > 0.0:
                 # chunk here is an already-validated DocumentChunk stored in the index, so

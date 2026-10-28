@@ -57,42 +57,50 @@ def test_extraction_math_yoy_qoq(old_val, new_val, expected_pct, description):
 # Each test verifies that the CrossEncoderReranker's boost algorithm produces
 # the documented score multipliers. The reranker boosts are:
 #
+# Reranker scoring contract (documented):
 #   - term_ratio:    (matches / len(query_terms))  — how many query terms appear in content
-#   - table_boost:   1.25 if chunk.is_table else 1.0  — table structure bonus
-#   - metric_boost:  1.15 if content contains a financial metric keyword
-#     else 1.0  — revenue, net income, eps, gross profit, operating income
+#   - table_boost:           1.25 — query asks for tables/statements AND chunk is a table
+#   - metrics_table_boost:   1.10 — query asks for financial metrics AND chunk is a table,
+#     and table_boost did not already fire (statement chunks carry the primary figures)
+#   - metric_boost:  1.15 — query asks about financial metrics AND the content
+#     contains a metric keyword (revenue, net income, eps, gross profit, operating income)
 #
-# The final score = base_score * (1.0 + term_ratio) * table_boost * metric_boost
+# The final score = base_score * (1.0 + term_ratio) * table_boost * metrics_table_boost * metric_boost
 #
 # Important design note: all boosts are positive multipliers. The reranker can
-# inflate a high-scoring hit but cannot demote a low-scoring one. This is
-# documented so reviewers are aware of the limitation.
+# inflate a high-scoring hit but cannot demote a low-scoring one. Boosts are
+# query-conditional so a risk question is never outranked merely because a
+# competing chunk mentions revenue.
 
 
 test_reranker_cases = [
-    # (query_terms, content, is_table, metric_boost_expected, description)
-    # Test 0: metric keyword "revenue" present in content → boost applied
-    ({"revenue"}, "Revenue grew 15% year-over-year", False, 1.15, "revenue keyword boost"),
-    # Test 1: no financial metric keywords in content → no boost
-    ({"risk", "factor"}, "Risk factors include market volatility", False, 1.0, "no metric boost"),
-    # Test 2: table chunk with content that has NO financial metric keywords → table boost only
-    ({"xyz"}, "Some random table content here", True, 1.0, "table boost only, no metric boost"),
-    # Test 3: AI terms but no financial keywords → no metric boost
-    ({"ai", "software"}, "AI and software architecture investments increased", False, 1.0, "AI terms without financial keywords"),
+    # (query, content, is_table, expected_table_boost, expected_metric_boost, description)
+    # Test 0: metric query + metric-keyword content → boosts applied
+    ("Apple revenue growth for the quarter", "Revenue grew 15% year-over-year", False, 1.0, 1.0, 1.15, "metric query gets metric boost"),
+    # Test 1: risk query with revenue-keyword content → NO metric boost (the Item 1A regression pin)
+    ("What key operational and market risks were disclosed", "Revenue grew 15% year-over-year", False, 1.0, 1.0, 1.0, "risk query ignores revenue chunks"),
+    # Test 2: table query + table chunk → explicit table boost applied
+    ("Show me the consolidated statements", "ABCDEFGHIJKLMNOPQRSTUVWXYZ", True, 1.25, 1.0, 1.0, "table query gets table boost"),
+    # Test 3: non-table query + table chunk → NO table boost (the unconditional-table regression pin)
+    ("What market risks were disclosed", "Helvetica random table content", True, 1.0, 1.0, 1.0, "risk query ignores table chunks"),
+    # Test 4: metric query + table chunk without metric keywords → metrics_table_boost only
+    ("What was total revenue in Q1", "CONSOLIDATED STATEMENTS OF OPERATIONS 2024", True, 1.0, 1.10, 1.0, "metric query favors statement chunks"),
+    # Test 5: table query + table chunk with metric keywords → table_boost, no metrics_table_boost double-count
+    ("Show the statement with the net income", "Net income rose 5% year-over-year", True, 1.25, 1.0, 1.15, "explicit table boost excludes metrics_table_boost"),
 ]
 
 
 @pytest.mark.parametrize(
-    "query_terms, content, is_table, metric_boost_expected, description",
+    "query, content, is_table, table_boost_expected, metrics_table_boost_expected, metric_boost_expected, description",
     test_reranker_cases,
 )
-def test_reranker_boost_behavior(query_terms, content, is_table, metric_boost_expected, description):
-    """Reranker boosts are applied correctly — and documented so they can't silently demote."""
+def test_reranker_boost_behavior(query, content, is_table, table_boost_expected, metrics_table_boost_expected, metric_boost_expected, description):
+    """Boosts fire only when the query asks for them — pins the query-conditional contract."""
     from src.retrieval.reranker import CrossEncoderReranker
 
     reranker = CrossEncoderReranker()
 
-    # Build a minimal SearchResultItem
+    # Build a minimal SearchResultItem (content chosen so term_ratio is computeable)
     chunk = DocumentChunk(
         chunk_id="rerank-test-1",
         ticker="TEST",
@@ -112,30 +120,29 @@ def test_reranker_boost_behavior(query_terms, content, is_table, metric_boost_ex
         chunk=chunk, score=0.5, retrieval_method="bm25"
     )
 
-    # The reranker's algorithm (from reranker.py)
-    base_score = item.score
+    reranked = reranker.rerank(query, [item], top_k=10)
+    assert len(reranked) == 1
+    actual_final = reranked[0].score
+
+    # Recompute the documented contract and confirm the reranker matches it
+    import re
+    query_terms = set(re.findall(r"\w+", query.lower()))
     content_lower = content.lower()
     matches = sum(1 for term in query_terms if term in content_lower)
     term_ratio = matches / max(1, len(query_terms))
-    table_boost = 1.25 if is_table else 1.0
-    metric_boost = 1.15 if any(
-        k in content_lower for k in ["revenue", "net income", "eps", "gross profit", "operating income"]
-    ) else 1.0
-
-    final_score = base_score * (1.0 + term_ratio) * table_boost * metric_boost
-
-    # Verify the boost factors are present as expected
-    assert metric_boost == metric_boost_expected, (
-        f"{description}: metric_boost={metric_boost}, expected={metric_boost_expected}"
+    # Test 2 has a table chunk with no metric-keyword-containing content, so no
+    # metric boost can fire in the oracle either; the table_boost pin stands.
+    metric_query_wanted = any(s in query.lower() for s in ("revenue", "income", "eps", "profit", "margin", "earnings", "growth", "yoy", "year-over-year", "quarter", "cash"))
+    # metrics_table_boost fires only when the query asks for metrics and the
+    # chunk is a table AND the explicit table boost did not fire.
+    metrics_table_boost = (
+        1.10 if metric_query_wanted and is_table and table_boost_expected == 1.0 else 1.0
     )
-    assert table_boost == (1.25 if is_table else 1.0), (
-        f"{description}: table_boost should be {1.25 if is_table else 1.0}"
-    )
+    expected_final = round(0.5 * (1.0 + term_ratio) * table_boost_expected * metrics_table_boost * metric_boost_expected, 4)
 
-    # Verify the final score incorporates all boosts
-    expected_final = round(base_score * (1.0 + term_ratio) * table_boost * metric_boost, 4)
-    assert final_score == expected_final, (
-        f"{description}: final_score={final_score}, expected={expected_final}"
+    assert actual_final == expected_final, (
+        f"{description}: final_score={actual_final}, expected={expected_final} "
+        f"(table_boost={table_boost_expected}, metrics_table_boost={metrics_table_boost}, metric_boost={metric_boost_expected})"
     )
 
 
@@ -197,3 +204,40 @@ def test_out_of_domain_question_yields_single_unverified_claim():
     assert claim.status == ClaimVerificationStatus.UNVERIFIED
     assert claim.numerical_value is None
     assert claim.expected_xbrl_value is None
+
+
+@pytest.mark.parametrize(
+    "question, concept, fiscal_year, fiscal_period",
+    [
+        ("What was Apple's revenue in Q1 2024?", "Revenues", 2024, "Q1"),
+        ("What was Apple's net income in FY 2023?", "NetIncomeLoss", 2023, "FY"),
+        ("What was Apple's diluted EPS in FY 2023?", "EarningsPerShareDiluted", 2023, "FY"),
+    ],
+)
+def test_verifier_selects_requested_concept_and_period(
+    question, concept, fiscal_year, fiscal_period
+):
+    """Numerical verification must match both the requested metric and period."""
+    from src.agents.verifier import VerificationAgent
+    from src.ingestion.sec_client import generate_mock_xbrl_facts
+
+    company = CompanyInfo(
+        ticker="AAPL",
+        cik="0000320193",
+        name="Apple Inc.",
+        sector=SectorType.TECHNOLOGY,
+    )
+    facts = generate_mock_xbrl_facts(company)
+    expected = next(
+        fact for fact in facts
+        if fact.concept == concept
+        and fact.fiscal_year == fiscal_year
+        and fact.fiscal_period == fiscal_period
+    )
+
+    claims = VerificationAgent().verify_claims(question, facts, chunks=[])
+    numerical_claim = next(claim for claim in claims if claim.claim_id.startswith("claim-num-"))
+
+    assert numerical_claim.status == ClaimVerificationStatus.VERIFIED
+    assert numerical_claim.numerical_value == expected.value
+    assert f"{fiscal_period} {fiscal_year}" in numerical_claim.claim_text
