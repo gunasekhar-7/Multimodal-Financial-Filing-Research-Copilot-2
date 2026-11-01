@@ -1,0 +1,16 @@
+[tool.mypy]
+explicit_package_bases = true
+ignore_missing_imports = false
+
+[[tool.mypy.overrides]]
+module = [
+    "redis",
+    "redis.*",
+    "bcrypt",
+    "bcrypt.*",
+    "jwt",
+    "jwt.*",
+    "email_validator",
+    "email_validator.*",
+]
+ignore_missing_imports = true

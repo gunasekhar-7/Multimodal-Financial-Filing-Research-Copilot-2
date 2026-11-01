@@ -32,7 +32,7 @@ def _try_redis():
     if not REDIS_ENABLED:
         return None, None
     try:
-        import redis
+        import redis  # type: ignore[import-not-found,import-untyped]
 
         client = redis.from_url(REDIS_URL, socket_connect_timeout=1, socket_timeout=1)
         client.ping()
@@ -72,9 +72,10 @@ class RedisSlidingWindowRateLimiter:
     """
 
     def __init__(self, limit: int | None = None, window_seconds: float = 60.0):
-        self.limit = int(
-            limit if limit is not None else os.getenv("RATE_LIMIT_PER_MINUTE", "60")
-        )
+        if limit is not None:
+            self.limit = limit
+        else:
+            self.limit = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
         self.window_seconds = window_seconds
         # Fallback in-process limiter
         self._fallback = None
