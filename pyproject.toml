@@ -10,5 +10,7 @@ module = [
     "bcrypt.*",
     "jwt",
     "jwt.*",
+    "email_validator",
+    "email_validator.*",
 ]
 ignore_missing_imports = true
