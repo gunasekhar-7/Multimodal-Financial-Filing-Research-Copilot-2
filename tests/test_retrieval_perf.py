@@ -1,8 +1,8 @@
 import time
-import pytest
-from src.schemas.financial import SearchQuery, SearchResultItem, FilingType
-from src.storage.database import DatabaseStorage
+
 from src.retrieval.hybrid_search import HybridSearchEngine
+from src.schemas.financial import FilingType, SearchQuery, SearchResultItem
+from src.storage.database import DatabaseStorage
 
 
 def test_retrieval_hot_path_avg_under_threshold(tmp_path):
@@ -46,8 +46,7 @@ def test_retrieval_hot_path_avg_under_threshold(tmp_path):
     # Keep the hot path cheap enough that it is not the systemic bottleneck on
     # the seeded corpus. This is a regression guard, not a benchmark promise.
     assert avg_ms < 25.0, (
-        f"retrieval hot path regressed: {avg_ms:.2f} ms avg per search "
-        f"(limit 25.0 ms)"
+        f"retrieval hot path regressed: {avg_ms:.2f} ms avg per search (limit 25.0 ms)"
     )
 
 

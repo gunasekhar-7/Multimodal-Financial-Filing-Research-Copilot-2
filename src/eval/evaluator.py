@@ -1,13 +1,16 @@
 import json
-import time
 import os
+import time
+from typing import Any
+
 import numpy as np
-from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
-from src.storage.database import DatabaseStorage
+
 from src.agents.orchestrator import ResearchOrchestrator
-from src.schemas.financial import SearchQuery
+from src.schemas.financial import DataSource, SearchQuery
 from src.schemas.reports import ClaimVerificationStatus
+from src.storage.database import DatabaseStorage
+
 
 class EvaluationResult(BaseModel):
     total_questions: int
@@ -18,25 +21,32 @@ class EvaluationResult(BaseModel):
     claim_faithfulness_rate_pct: float
     latency_p50_sec: float
     latency_p95_sec: float
-    category_breakdown: Dict[str, Dict[str, float]]
+    category_breakdown: dict[str, dict[str, float]]
+
 
 class BenchmarkEvaluator:
-    def __init__(self, db: Optional[DatabaseStorage] = None, dataset_path: Optional[str] = None):
+    def __init__(
+        self, db: DatabaseStorage | None = None, dataset_path: str | None = None
+    ):
         self.db = db or DatabaseStorage()
         self.orchestrator = ResearchOrchestrator(db=self.db)
         if dataset_path is None:
-            dataset_path = os.path.join(os.path.dirname(__file__), "golden_dataset.json")
+            dataset_path = os.path.join(
+                os.path.dirname(__file__), "golden_dataset.json"
+            )
         self.dataset_path = dataset_path
 
-    def load_dataset(self) -> List[Dict[str, Any]]:
+    def load_dataset(self) -> list[dict[str, Any]]:
         with open(self.dataset_path, "r", encoding="utf-8") as f:
             return json.load(f)
 
-    def evaluate(self, sample_limit: Optional[int] = None) -> EvaluationResult:
+    def evaluate(self, sample_limit: int | None = None) -> EvaluationResult:
         dataset = self.load_dataset()
         if sample_limit and sample_limit < len(dataset):
             dataset = dataset[:sample_limit]
 
+        if not dataset:
+            raise ValueError("Evaluation dataset is empty; no metrics can be computed.")
         ranks = []
         hits_at_k = 0
         k = 5
@@ -46,31 +56,52 @@ class BenchmarkEvaluator:
 
         citation_resolved = 0
         citation_total = 0
-
         faithful_claims = 0
         claims_total = 0
 
         latencies = []
-        category_stats: Dict[str, Dict[str, Any]] = {}
+        category_stats: dict[str, dict[str, Any]] = {}
 
         for item in dataset:
             cat = item.get("category", "general")
             if cat not in category_stats:
-                category_stats[cat] = {"count": 0, "hits": 0, "num_correct": 0, "num_total": 0}
+                category_stats[cat] = {
+                    "count": 0,
+                    "hits": 0,
+                    "num_correct": 0,
+                    "num_total": 0,
+                }
 
             category_stats[cat]["count"] += 1
 
             start_time = time.time()
 
+            if item.get("expected_data_source", "demo") != "demo":
+                raise ValueError(
+                    "This benchmark is defined only for the deterministic demo data source."
+                )
+
             # Evaluate Retrieval Quality (Recall@k & MRR)
             ticker = item["expected_ticker"]
-            q = SearchQuery(query=item["question"], tickers=[ticker], top_k=k)
+            q = SearchQuery(
+                query=item["question"],
+                tickers=[ticker],
+                top_k=k,
+                sections=[item["expected_item_section"]]
+                if item.get("expected_item_section")
+                else None,
+            )
             retrieved = self.orchestrator.search_engine.search(q)
+            all_source_chunks = self.orchestrator.search_engine._get_all_chunks()
+            source_chunks_by_id = {chunk.chunk_id: chunk for chunk in all_source_chunks}
 
             rank = 0
             for idx, res in enumerate(retrieved):
                 expected_sec = item.get("expected_item_section")
-                if expected_sec and expected_sec.lower() in res.chunk.item_section.lower():
+                if (
+                    expected_sec
+                    and expected_sec.lower() in res.chunk.item_section.lower()
+                ):
                     rank = idx + 1
                     break
 
@@ -95,8 +126,13 @@ class BenchmarkEvaluator:
                 # Check claims
                 matched = False
                 for claim in report.claims:
-                    if claim.numerical_value is not None:
-                        diff = abs(claim.numerical_value - expected_val) / max(1.0, abs(expected_val))
+                    if (
+                        claim.status == ClaimVerificationStatus.UNVERIFIED
+                        and claim.numerical_value is not None
+                    ):
+                        diff = abs(claim.numerical_value - expected_val) / max(
+                            1.0, abs(expected_val)
+                        )
                         if diff <= item.get("tolerance_pct", 0.01):
                             matched = True
                             break
@@ -107,13 +143,41 @@ class BenchmarkEvaluator:
             # Citation resolution check
             for cite in report.citations:
                 citation_total += 1
-                if cite.source_url and len(cite.excerpt) > 10:
+                chunk_id = cite.citation_id.removeprefix("cite-")
+                source_chunk = source_chunks_by_id.get(chunk_id)
+                if (
+                    source_chunk is not None
+                    and cite.data_source == source_chunk.data_source
+                    and len(cite.excerpt) >= 20
+                    and cite.excerpt in source_chunk.content
+                    and (
+                        (
+                            cite.data_source == DataSource.SEC_EDGAR
+                            and cite.source_url.startswith("https://www.sec.gov/")
+                        )
+                        or (
+                            cite.data_source == DataSource.DEMO
+                            and cite.source_url.startswith("demo://")
+                        )
+                    )
+                ):
                     citation_resolved += 1
 
             # Claim faithfulness check
             for claim in report.claims:
                 claims_total += 1
-                if claim.status == ClaimVerificationStatus.VERIFIED and len(claim.citations) > 0:
+                if (
+                    claim.status == ClaimVerificationStatus.VERIFIED
+                    and len(claim.citations) > 0
+                    and all(
+                        citation.data_source == DataSource.SEC_EDGAR
+                        for citation in claim.citations
+                    )
+                    and (
+                        claim.numerical_value is None
+                        or claim.numerical_value == claim.expected_xbrl_value
+                    )
+                ):
                     faithful_claims += 1
 
         recall_at_k = round((hits_at_k / max(1, len(dataset))) * 100.0, 2)
@@ -129,8 +193,14 @@ class BenchmarkEvaluator:
         for c, stats in category_stats.items():
             cat_breakdown[c] = {
                 "count": float(stats["count"]),
-                "recall_at_k": round((stats["hits"] / max(1, stats["count"])) * 100.0, 2),
-                "numerical_accuracy": round((stats["num_correct"] / max(1, stats["num_total"])) * 100.0, 2) if stats["num_total"] > 0 else 100.0
+                "recall_at_k": round(
+                    (stats["hits"] / max(1, stats["count"])) * 100.0, 2
+                ),
+                "numerical_accuracy": round(
+                    (stats["num_correct"] / max(1, stats["num_total"])) * 100.0, 2
+                )
+                if stats["num_total"] > 0
+                else 0.0,
             }
 
         return EvaluationResult(
@@ -142,5 +212,5 @@ class BenchmarkEvaluator:
             claim_faithfulness_rate_pct=faith_rate,
             latency_p50_sec=p50,
             latency_p95_sec=p95,
-            category_breakdown=cat_breakdown
+            category_breakdown=cat_breakdown,
         )

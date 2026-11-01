@@ -3,53 +3,58 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multimodal Financial-Filing Research Copilot</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <title>Financial Filing Research Copilot</title>
+    <!-- Offline vendored styles -->
+    <link rel="stylesheet" href="/static/vendored.css">
+    <script>
+        // Minimal fallback styling if vendored styles aren't fully loaded
+        window.tailwind = window.tailwind || {};
+    </script>
 </head>
-<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans antialiased">
 
-    <!-- Header -->
-    <header class="border-b border-slate-800 bg-slate-950 px-6 py-4 flex justify-between items-center sticky top-0 z-50">
+    <!-- Top Navigation -->
+    <header class="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-50 px-6 py-4 flex justify-between items-center">
         <div class="flex items-center space-x-3">
-            <div class="bg-blue-600 text-white p-2.5 rounded-lg font-bold text-xl">
+            <div class="bg-blue-600 text-white p-2 rounded-lg text-lg flex items-center justify-center w-9 h-9">
                 <i class="fa-solid fa-chart-line"></i>
             </div>
             <div>
-                <h1 class="font-extrabold text-xl tracking-tight text-white">Financial Research Copilot</h1>
-                <p class="text-xs text-slate-400">Multimodal SEC Filing Analysis & Grounded XBRL Verification</p>
+                <h1 class="text-base font-bold tracking-tight text-white">Financial Filing Research Copilot</h1>
+                <p class="text-xs text-slate-400">Local research copilot for SEC filings, XBRL structured data, and claim verification</p>
             </div>
         </div>
-        <div class="flex items-center space-x-4 text-xs text-slate-400">
-            <span class="bg-emerald-950 text-emerald-400 border border-emerald-800/50 px-2.5 py-1 rounded-full font-medium">
-                <i class="fa-solid fa-check-circle mr-1"></i> Deterministic Verification Active
-            </span>
-            <span id="system-status" class="bg-slate-800 px-2.5 py-1 rounded-full">
-                Checking connection...
-            </span>
+        <div class="flex items-center space-x-3 text-xs">
+            <span id="system-status" class="bg-slate-800 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700">Connecting...</span>
+            <span id="data-mode-badge" class="bg-slate-800 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700">Checking mode...</span>
+            <a href="/docs" target="_blank" class="text-blue-400 hover:text-blue-300 flex items-center space-x-1">
+                <span>API Docs</span>
+                <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+            </a>
         </div>
     </header>
 
-    <!-- Main Container -->
+    <!-- Main Workspace -->
     <main class="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-        <!-- Left Controls & Preset Sidebar -->
+        <!-- Left Control Column -->
         <div class="lg:col-span-4 space-y-6">
 
             <!-- Query Input Card -->
-            <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 shadow-lg">
-                <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center">
-                    <i class="fa-solid fa-magnifying-glass mr-2 text-blue-500"></i> Analyst Query
+            <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 shadow-lg space-y-4">
+                <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center">
+                    <i class="fa-solid fa-magnifying-glass mr-2 text-blue-400"></i> New Research Query
                 </h2>
 
                 <div class="space-y-4">
                     <div>
-                        <label class="block text-xs font-medium text-slate-300 mb-1">Target Company</label>
-                        <select id="company-select" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
-                            <option value="AAPL">AAPL - Apple Inc.</option>
+                        <label class="block text-xs font-medium text-slate-300 mb-1">Company Universe</label>
+                        <select id="company-select" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-blue-500">
+                            <option value="">Loading companies...</option>
                         </select>
                     </div>
 
+                    <p id="first-run-guidance" class="text-xs text-slate-400 leading-relaxed">Start with a sample question below. Demo mode uses deterministic synthetic data; its numbers are not SEC-reported.</p>
                     <div>
                         <label class="block text-xs font-medium text-slate-300 mb-1">Research Question</label>
                         <textarea id="question-input" rows="4" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-blue-500" placeholder="e.g. Compare Apple's 2023 vs 2024 revenue growth and key risk factors..."></textarea>
@@ -81,13 +86,15 @@
             <!-- Notice Disclaimer -->
             <div class="bg-amber-950/30 border border-amber-800/40 rounded-xl p-4 text-xs text-amber-300/90 leading-relaxed">
                 <i class="fa-solid fa-triangle-exclamation text-amber-400 mr-1.5"></i>
-                <strong>Research Tool Notice:</strong> Generated analysis is derived from SEC filings and XBRL facts for information only. Not investment advice.
+                <strong>Research Tool Notice:</strong> Demo mode is synthetic and not SEC-reported. SEC mode currently provides structured facts only; outputs are educational and not investment advice.
             </div>
 
         </div>
 
         <!-- Right Output Column -->
         <div class="lg:col-span-8 space-y-6">
+
+            <div id="error-state" role="alert" class="hidden bg-rose-950/60 border border-rose-800 rounded-lg p-4 text-sm text-rose-200"></div>
 
             <!-- Loading Spinner -->
             <div id="loading-state" class="hidden bg-slate-950 border border-slate-800 rounded-xl p-12 text-center space-y-4">
@@ -106,11 +113,12 @@
                     <i class="fa-solid fa-file-invoice-dollar"></i>
                 </div>
                 <h3 class="text-base font-medium text-slate-300">No Research Report Generated</h3>
-                <p class="text-xs text-slate-500 max-w-md mx-auto">Select a company and ask a financial question on the left to generate an evidence-backed report with page-level citations and verified XBRL facts.</p>
+                <p class="text-xs text-slate-500 max-w-md mx-auto">Choose a sample question or write your own. The report labels synthetic demo data and keeps narrative findings unverified unless independently supported.</p>
             </div>
 
             <!-- Generated Report Card -->
             <div id="report-container" class="hidden space-y-6">
+                <div id="report-provenance" role="status" class="rounded-lg border p-3 text-xs font-semibold"></div>
 
                 <!-- Executive Summary -->
                 <div class="bg-slate-950 border border-slate-800 rounded-xl p-6 shadow-lg space-y-4">
@@ -124,10 +132,18 @@
                     <div id="executive-summary" class="text-sm text-slate-300 leading-relaxed whitespace-pre-line"></div>
                 </div>
 
+                <!-- Multimodal Visual Artifacts & Charts -->
+                <div id="visual-artifacts-card" class="bg-slate-950 border border-slate-800 rounded-xl p-6 shadow-lg space-y-4">
+                    <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center">
+                        <i class="fa-solid fa-chart-column mr-2 text-sky-400"></i> Multimodal Visual Financial Charts & Disclosures
+                    </h3>
+                    <div id="visual-artifacts-container" class="space-y-6"></div>
+                </div>
+
                 <!-- Verified Claims -->
                 <div class="bg-slate-950 border border-slate-800 rounded-xl p-6 shadow-lg space-y-4">
                     <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center">
-                        <i class="fa-solid fa-shield-check text-emerald-400 mr-2"></i> Verified Financial Claims
+                        <i class="fa-solid fa-shield-halved text-blue-400 mr-2"></i> Claims & Verification Status
                     </h3>
                     <div id="claims-list" class="space-y-3"></div>
                 </div>
@@ -143,7 +159,7 @@
                 <!-- Citations & References -->
                 <div class="bg-slate-950 border border-slate-800 rounded-xl p-6 shadow-lg space-y-4">
                     <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center">
-                        <i class="fa-solid fa-bookmark mr-2 text-amber-400"></i> SEC Filing Page-Level Citations
+                        <i class="fa-solid fa-bookmark mr-2 text-amber-400"></i> Sources & Citations
                     </h3>
                     <div id="citations-list" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
                 </div>
