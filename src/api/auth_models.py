@@ -168,7 +168,7 @@ class PasswordHash:
     @staticmethod
     def hash(password: str) -> str:
         try:
-            import bcrypt
+            import bcrypt  # type: ignore[import-not-found,import-untyped]
 
             return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode(
                 "utf-8"
@@ -185,7 +185,7 @@ class PasswordHash:
     @staticmethod
     def verify(password: str, hashed: str) -> bool:
         try:
-            import bcrypt
+            import bcrypt  # type: ignore[import-not-found,import-untyped]
 
             return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
         except ImportError:
@@ -221,7 +221,7 @@ class TokenService:
         import time
 
         try:
-            import jwt
+            import jwt  # type: ignore[import-not-found,import-untyped]
 
             now = int(time.time())
             expire = now + int((expires_delta or timedelta(minutes=30)).total_seconds())
@@ -291,7 +291,7 @@ class TokenService:
 
     def decode_token(self, token: str) -> dict[str, Any] | None:
         try:
-            import jwt
+            import jwt  # type: ignore[import-not-found,import-untyped]
 
             try:
                 return jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
