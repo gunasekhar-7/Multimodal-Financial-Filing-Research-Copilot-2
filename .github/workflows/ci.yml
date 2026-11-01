@@ -24,15 +24,34 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Seed Database
+      - name: Lint (ruff)
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Typecheck (mypy)
+        run: |
+          mypy src/ --explicit-package-bases
+
+      - name: Seed deterministic demo database
+        env:
+          DATA_MODE: demo
+          DATABASE_PATH: ${{ runner.temp }}/financial_copilot.db
         run: |
           PYTHONPATH=. python scripts/seed_database.py
 
       - name: Run Unit & Integration Tests
+        env:
+          DATA_MODE: demo
+          DATABASE_PATH: ${{ runner.temp }}/financial_copilot.db
         run: |
           PYTHONPATH=. pytest --cov=src --cov-report=term-missing tests/
 
       - name: Run Benchmark Evaluation
+        env:
+          DATA_MODE: demo
+          DATABASE_PATH: ${{ runner.temp }}/financial_copilot.db
+          EVAL_RESULTS_PATH: ${{ runner.temp }}/eval_results.json
         run: |
           PYTHONPATH=. python scripts/run_eval.py
 
@@ -40,11 +59,13 @@ jobs:
         run: |
           python -c "
           import json, sys
-          with open('eval_results.json') as f:
+          with open('${{ runner.temp }}/eval_results.json') as f:
               res = json.load(f)
           print('Loaded benchmark results:', res)
+          assert res['total_questions'] == 150, f"Expected full 150-question dataset, got {res['total_questions']}"
           assert res['recall_at_k'] >= 50.0, f'Recall@k too low: {res[\"recall_at_k\"]}%'
+          assert res['numerical_accuracy_pct'] >= 95.0, f'Numerical accuracy too low: {res[\"numerical_accuracy_pct\"]}%'
           assert res['citation_resolution_rate_pct'] >= 90.0, f'Citation resolution rate too low: {res[\"citation_resolution_rate_pct\"]}%'
-          assert res['claim_faithfulness_rate_pct'] >= 85.0, f'Claim faithfulness too low: {res[\"claim_faithfulness_rate_pct\"]}%'
+          assert res['claim_faithfulness_rate_pct'] == 0.0, 'Demo dataset must not count as SEC-verified claim faithfulness'
           print('All CI evaluation quality gates PASSED!')
           "

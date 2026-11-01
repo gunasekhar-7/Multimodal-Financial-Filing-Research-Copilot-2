@@ -1,21 +1,27 @@
 import logging
-from typing import Optional
-from src.schemas.agents import AgentState, ResearchPlan
-from src.schemas.reports import ResearchReport
-from src.storage.database import DatabaseStorage
-from src.retrieval.hybrid_search import HybridSearchEngine
+import os
+
+from src.agents.analysis import FinancialAnalysisAgent
+from src.agents.extraction import FinancialExtractionAgent
 from src.agents.planner import PlannerAgent
 from src.agents.retrieval_agent import RetrievalAgent
-from src.agents.extraction import FinancialExtractionAgent
-from src.agents.analysis import FinancialAnalysisAgent
 from src.agents.verifier import VerificationAgent
+from src.agents.visualizer import MultimodalVisualizerAgent
 from src.agents.writer import ReportWriterAgent
+from src.retrieval.hybrid_search import HybridSearchEngine
+from src.schemas.agents import AgentState
+from src.schemas.financial import DataSource
+from src.schemas.reports import ResearchReport
+from src.storage.database import DatabaseStorage
 
 logger = logging.getLogger(__name__)
 
+
 class ResearchOrchestrator:
-    def __init__(self, db: Optional[DatabaseStorage] = None):
-        self.db = db or DatabaseStorage()
+    def __init__(self, db: DatabaseStorage | None = None):
+        self.db = db or DatabaseStorage(
+            db_path=os.getenv("DATABASE_PATH", "financial_copilot.db")
+        )
         self.search_engine = HybridSearchEngine(self.db)
 
         self.planner = PlannerAgent()
@@ -23,10 +29,12 @@ class ResearchOrchestrator:
         self.extraction_agent = FinancialExtractionAgent()
         self.analysis_agent = FinancialAnalysisAgent()
         self.verifier = VerificationAgent()
+        self.visualizer = MultimodalVisualizerAgent()
         self.writer = ReportWriterAgent()
 
     def run(self, question: str, default_ticker: str = "AAPL") -> ResearchReport:
-        state = AgentState(question=question, tickers=[])
+        data_mode = os.getenv("DATA_MODE", "demo").lower()
+        state = AgentState(question=question, tickers=[], data_mode=data_mode)
         state.logs.append(f"Received research question: {question}")
 
         # Step 1: Planning
@@ -34,16 +42,29 @@ class ResearchOrchestrator:
         state.plan = plan
         state.tickers = plan.tickers
         state.logs.append(f"Generated research plan for tickers: {plan.tickers}")
-        logger.info("Plan generated for question %r: tickers=%s", question, plan.tickers)
+        logger.info(
+            "Plan generated for question %r: tickers=%s", question, plan.tickers
+        )
 
         # Step 2: Retrieval
-        chunks = self.retrieval_agent.retrieve_chunks(
-            question, state.tickers, top_k=10, sections=plan.section_hints
+        selected_source = (
+            DataSource.SEC_EDGAR if data_mode == "sec" else DataSource.DEMO
         )
-        facts = self.retrieval_agent.retrieve_facts(state.tickers)
+        chunks = self.retrieval_agent.retrieve_chunks(
+            question,
+            state.tickers,
+            top_k=10,
+            sections=plan.section_hints,
+            data_source=selected_source,
+        )
+        facts = self.retrieval_agent.retrieve_facts(
+            state.tickers, data_source=selected_source
+        )
         state.retrieved_chunks = chunks
         state.retrieved_facts = facts
-        state.logs.append(f"Retrieved {len(chunks)} document chunks and {len(facts)} XBRL facts.")
+        state.logs.append(
+            f"Retrieved {len(chunks)} document chunks and {len(facts)} XBRL facts."
+        )
         logger.info("Retrieval complete: chunks=%d facts=%d", len(chunks), len(facts))
 
         # Step 3: Financial Metric Extraction
@@ -59,12 +80,26 @@ class ResearchOrchestrator:
         logger.info("Risk analysis complete: disclosures=%d", len(risk_analysis))
 
         # Step 5: Verification
-        claims = self.verifier.verify_claims(question, facts, chunks)
+        claims = self.verifier.verify_claims(
+            question, facts, chunks, target_tickers=state.tickers
+        )
         state.claims = claims
-        state.logs.append(f"Verified {len(claims)} numerical & qualitative claims against ground truth.")
+        state.logs.append(
+            f"Verified {len(claims)} numerical & qualitative claims against ground truth."
+        )
         logger.info("Verification complete: claims=%d", len(claims))
 
-        # Step 6: Report Writing
+        # Step 6: Multimodal Visual Synthesis
+        visual_artifacts = self.visualizer.generate_artifacts(
+            state.tickers, state.extracted_metrics, state.retrieved_chunks
+        )
+        state.visual_artifacts = visual_artifacts
+        state.logs.append(
+            f"Synthesized {len(visual_artifacts)} multimodal visual charts & statement tables."
+        )
+        logger.info("Visual synthesis complete: artifacts=%d", len(visual_artifacts))
+
+        # Step 7: Report Writing
         report = self.writer.generate_report(state)
         state.final_report = report
         state.logs.append("Generated final structured research report.")

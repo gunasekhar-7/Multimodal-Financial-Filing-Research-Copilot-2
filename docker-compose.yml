@@ -11,6 +11,9 @@ services:
     environment:
       - PORT=8000
       - LOG_LEVEL=INFO
+      - DATA_MODE=${DATA_MODE:-demo}
+      - DATABASE_PATH=/app/data/financial_copilot.db
+      - SEC_USER_AGENT=${SEC_USER_AGENT:-}
     volumes:
       - ./data:/app/data
     healthcheck:

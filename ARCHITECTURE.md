@@ -1,32 +1,47 @@
 # Technical Architecture & System Design
 
-## Overview
-The Multimodal Financial-Filing Research Copilot is designed to solve common limitations in traditional financial PDF RAG tools—such as hallucinated financial figures, lack of tabular alignment, and opaque citations—by introducing a deterministic verification layer backed by structured SEC EDGAR XBRL facts.
+This file is a concise map of the Financial Filing Research Copilot. The end-to-end data flow, design choices, trust boundaries, limitations, and prioritized future scope are documented in [docs/architecture.md](docs/architecture.md).
 
-## System Components
+## System overview
 
-### 1. Ingestion & Storage Pipeline
-- **SEC EDGAR Client**: Ingests company facts and filings for 25 technology sector companies over 8 quarters (2023-Q1 through 2024-FY). Includes offline deterministic fallback for test reproducibility and high availability.
-- **Page-Level Document Chunker**: Preserves SEC Item sections (Item 1A, Item 7, Item 8), page numbers, accession numbers, and table structures.
-- **Storage Layer**: SQLite database using standard FTS5 full-text indexing alongside TF-IDF dense vector embeddings.
+The application is a local FastAPI service with a vanilla JavaScript dashboard, SQLite storage with versioned SQL migrations, FTS5 lexical retrieval, a scikit-learn TF-IDF retrieval channel, Redis-backed sliding-window rate limiting & metrics (with zero-dependency local fallback), JWT/API-key multi-tenant authentication, and a typed Python agent pipeline featuring multimodal SVG chart & financial statement synthesis. It does not use an LLM service in its query path.
 
-### 2. Hybrid Retrieval Engine
-- **BM25 Search**: Full-text exact keyword match over SEC Item text and table chunks.
-- **Dense Vector Search**: Semantic cosine similarity over n-gram TF-IDF document vectors.
-- **Reciprocal Rank Fusion (RRF)**: Combines sparse BM25 and dense rank vectors:
-  $$RRF(d) = \sum_{m \in M} \frac{1}{k + r_m(d)}$$
-- **Cross-Encoder Reranker**: Boosts tabular structures and financial metric phrases ("revenue", "net income", "operating margin").
+The default `demo` mode is deterministic generated data. The opt-in `sec` mode fetches SEC Company Facts structured data for supported companies/periods; live filing-text ingestion is not implemented. SEC fetch failures are explicit and do not substitute demo content.
 
-### 3. Multi-Agent Orchestration Engine
-- **Contracts**: Typed Pydantic data schemas (`AgentState`, `ResearchPlan`, `VerifiedClaim`, `FinancialMetricComparison`, `ResearchReport`).
-- **Agents**:
-  - `PlannerAgent`: Constructs sub-tasks and targeted search queries.
-  - `RetrievalAgent`: Executes search queries and fetches XBRL ground truth facts.
-  - `FinancialExtractionAgent`: Aggregates concepts into YoY and QoQ comparisons.
-  - `FinancialAnalysisAgent`: Classifies risk disclosure trends.
-  - `VerificationAgent`: Verifies claims against XBRL facts and flags discrepancies.
-  - `ReportWriterAgent`: Formats executive summaries, citation lists, and uncertainty disclosures.
+## Component flow
 
-### 4. Observability & Quality Assurance
-- **Operational Metrics**: Endpoint health, latency percentiles (p50/p95), database record counts.
-- **Continuous Evaluation**: 150-question golden dataset executed in GitHub Actions CI/CD to prevent quality regression.
+```text
+Seed script → demo generator OR SEC Company Facts client → SQLite (Migrations 001, 002)
+Browser → FastAPI (Redis/Local Metrics & Sliding Rate Limiter + Auth Middleware)
+            └─ ResearchOrchestrator
+                 ├─ PlannerAgent
+                 ├─ RetrievalAgent (FTS5 + TF-IDF → RRF → heuristic reranker)
+                 ├─ FinancialExtractionAgent
+                 ├─ FinancialAnalysisAgent
+                 ├─ VerificationAgent
+                 ├─ MultimodalVisualizerAgent (SVG Performance Charts & Statements)
+                 └─ ReportWriterAgent
+Evaluator → demo golden dataset → retrieval + orchestrator → metrics JSON
+```
+
+## Package map
+
+- `src/api`: FastAPI routes, CORS, Redis-backed sliding-window rate limiting & latency percentiles (with zero-dependency local fallback), JWT/API-key auth service & routes.
+- `src/schemas`: Pydantic models for facts, chunks, plans, citations, claims, reports, and multimodal visual artifacts.
+- `src/ingestion`: supported company list with fiscal year-end specifications, deterministic demo generator, opt-in SEC structured-facts client.
+- `src/storage`: SQLite persistence, schema migrations (`001__initial_schema.sql`, `002__auth_and_tenants.sql`), provenance filters, FTS5 maintenance, and search queries.
+- `src/retrieval`: TF-IDF cosine search, BM25/RRF fusion, and query-conditional heuristic reranking.
+- `src/agents`: planning, retrieval, extraction, risk-passage selection, conservative verification, multimodal SVG chart & table synthesis, and report writing.
+- `src/eval` and `scripts`: deterministic demo benchmark and its runner/generator.
+- `src/web`: dashboard template and static browser code with client-side visual artifact rendering.
+
+## Important invariants
+
+1. Provenance is carried through facts, chunks, citations, reports, and visual artifacts; selected data mode filters retrieval before top-k selection.
+2. Demo values and qualitative excerpts are not labeled SEC-verified; synthetic visual artifacts carry explicit `demo` badges.
+3. An explicitly requested but unavailable fiscal period remains unverified rather than borrowing another period.
+4. FTS is derived from canonical `document_chunks`; storage replacement and initialization maintain/rebuild the index.
+5. All schema changes are applied through versioned, idempotent SQL migration files (`schema_migrations`).
+6. Observability and rate limiting use Redis when configured (`REDIS_URL`) and gracefully degrade to deterministic in-process structures when Redis is offline.
+
+For setup, endpoints, configuration, CI, Docker, and script contracts, see the [documentation hub](docs/index.md).

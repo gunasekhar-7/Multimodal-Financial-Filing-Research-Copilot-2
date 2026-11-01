@@ -1,18 +1,23 @@
 import time
-from typing import List, Dict, Any
-from src.schemas.financial import SearchQuery, SearchResultItem, DocumentChunk
-from src.storage.database import DatabaseStorage
+
 from src.retrieval.dense_search import DenseVectorSearch
 from src.retrieval.reranker import CrossEncoderReranker
+from src.schemas.financial import (
+    DataSource,
+    DocumentChunk,
+    SearchQuery,
+    SearchResultItem,
+)
+from src.storage.database import DatabaseStorage
 
 
 def reciprocal_rank_fusion(
-    bm25_results: List[SearchResultItem],
-    dense_results: List[SearchResultItem],
+    bm25_results: list[SearchResultItem],
+    dense_results: list[SearchResultItem],
     k: int = 60,
-) -> List[SearchResultItem]:
-    scores: Dict[str, float] = {}
-    chunks_map: Dict[str, DocumentChunk] = {}
+) -> list[SearchResultItem]:
+    scores: dict[str, float] = {}
+    chunks_map: dict[str, DocumentChunk] = {}
 
     # Rank BM25
     for rank, item in enumerate(bm25_results):
@@ -44,22 +49,31 @@ class HybridSearchEngine:
     def __init__(self, db: DatabaseStorage):
         self.db = db
         self.reranker = CrossEncoderReranker()
-        self.dense_search = DenseVectorSearch()        # Index is lazily initialized on first search; refresh() can be called
+        self.dense_search = (
+            DenseVectorSearch()
+        )  # Index is lazily initialized on first search; refresh() can be called
         # explicitly after a DB reseed so the dev server starts fast and
         # the index only rebuilds when data actually changes.
         self.last_index_refresh = None  # epoch seconds of latest refresh
+        self._index_fingerprint = None
 
     def ensure_index(self):
-        """Lazy index initialization / refresh from the current DB state.
-
-        Call this once before the first search, or after a DB reseed,
-        so the dev server starts fast and the dense index only rebuilds
-        when data actually changes.
-        """
-        chunks = self._get_all_chunks()
-        if self.dense_search.doc_vectors is None or self.dense_search.chunks != chunks:
+        """Refresh the dense index only when SQLite reports changed data."""
+        fingerprint = self._get_index_fingerprint()
+        if (
+            self.dense_search.doc_vectors is None
+            or fingerprint != self._index_fingerprint
+        ):
+            chunks = self._get_all_chunks()
             self.dense_search.refresh(chunks)
+            self._index_fingerprint = fingerprint
             self.last_index_refresh = time.time()
+
+    def _get_index_fingerprint(self):
+        with self.db.get_connection() as conn:
+            return conn.execute(
+                "SELECT revision FROM search_index_state WHERE singleton = 1"
+            ).fetchone()[0]
 
     def _get_all_chunks(self):
         """Fetch all document chunks from the DB for index refresh."""
@@ -85,6 +99,7 @@ class HybridSearchEngine:
                         content=r["content"],
                         is_table=bool(r["is_table"]),
                         source_url=r["source_url"],
+                        data_source=r["data_source"],
                     )
                 )
             return chunks
@@ -92,7 +107,9 @@ class HybridSearchEngine:
     CANDIDATE_MULTIPLIER = 3
     MIN_CANDIDATES = 25
 
-    def search(self, query: SearchQuery) -> List[SearchResultItem]:
+    def search(
+        self, query: SearchQuery, data_source: DataSource | None = None
+    ) -> list[SearchResultItem]:
         """Hybrid retrieval: BM25 + dense, RRF fusion, heuristic rerank.
 
         Candidate retrieval deliberately over-fetches (candidate_k =
@@ -105,11 +122,9 @@ class HybridSearchEngine:
         self.ensure_index()
         candidate_k = max(self.MIN_CANDIDATES, query.top_k * self.CANDIDATE_MULTIPLIER)
         candidate_query = query.model_copy(update={"top_k": candidate_k})
-        bm25_res = self.db.search_bm25(candidate_query)
-        dense_res = self.dense_search.search(candidate_query)
+        bm25_res = self.db.search_bm25(candidate_query, data_source=data_source)
+        dense_res = self.dense_search.search(candidate_query, data_source=data_source)
 
         fused_res = reciprocal_rank_fusion(bm25_res, dense_res)
-        final_reranked = self.reranker.rerank(
-            query.query, fused_res, top_k=query.top_k
-        )
+        final_reranked = self.reranker.rerank(query.query, fused_res, top_k=query.top_k)
         return final_reranked

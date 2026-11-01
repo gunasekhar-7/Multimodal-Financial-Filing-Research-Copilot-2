@@ -1,83 +1,75 @@
-# Contributing to the Financial-Filing Research Copilot
+# Contributing
 
-Thanks for your interest in improving the project. This document covers the
-setup, the commands you need, and the conventions we follow.
+Thank you for improving the Financial Filing Research Copilot. This guide covers local setup, project conventions, and checks to run before proposing a change.
 
-## Getting started
+## Development setup
 
-Requirements: Python 3.11+ and pip. No database server is needed — the
-project runs on an embedded SQLite database (`financial_copilot.db`).
+Requirements: Python 3.12 or newer and pip. SQLite is embedded; no database server or SEC account is required for the offline demo.
 
-1. Clone the repository and create a virtual environment:
+1. Create and activate a virtual environment:
 
    ```bash
    python -m venv .venv
-   # Windows
-   .venv\Scripts\activate
-   # macOS / Linux
+   # Windows PowerShell
+   .\.venv\Scripts\Activate.ps1
+   # macOS / Linux / Bash
    source .venv/bin/activate
    ```
 
-2. Install the dependencies:
+2. Install pinned dependencies:
 
    ```bash
-   pip install -r requirements.txt
+   python -m pip install -r requirements.txt
    ```
 
-3. Seed the demonstration corpus (10 technology companies, 8 quarters
-   2023-Q1 through 2024-FY):
+3. Seed an isolated deterministic demo database (the corpus is 25 technology companies, with eight generated periods per company):
 
    ```bash
-   python scripts/seed_database.py
+   mkdir -p data
+   DATA_MODE=demo DATABASE_PATH=./data/financial_copilot.db python scripts/seed_database.py
    ```
 
-4. Run the API + web dashboard locally (hot reload for UI changes):
+4. Start the API and dashboard using the same mode and database path:
 
    ```bash
-   uvicorn src.api.app:app --reload --port 8000
+   DATA_MODE=demo DATABASE_PATH=./data/financial_copilot.db python -m uvicorn src.api.app:app --reload --host 127.0.0.1 --port 8000
    ```
 
-   Then open http://localhost:8000. The API docs live at `/docs`.
+   Open <http://127.0.0.1:8000>; interactive API docs are at `/docs`. A full first-run walkthrough is in the [local tutorial](docs/tutorial-local.md).
 
-## Test and quality commands
+Do not use the root `financial_copilot.db` for disposable tests or reseeding if its contents need to be preserved. `scripts/seed_database.py` replaces the facts and chunks in its selected database.
 
-Run the full suite before every PR — CI runs the same commands:
+## Quality checks
+
+Set environment variables before pytest imports the FastAPI app; the app initializes its configured database at module import time. Use disposable paths and send benchmark output to ignored local data:
 
 ```bash
-# All tests
-python -m pytest tests/ -v
-
-# Evaluation benchmark (recall / MRR / accuracy / latency thresholds)
-python scripts/run_eval.py
+mkdir -p data
+DATA_MODE=demo DATABASE_PATH=./data/test.db python scripts/seed_database.py
+DATA_MODE=demo DATABASE_PATH=./data/test.db python -m pytest -q
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy src/ --explicit-package-bases
+DATA_MODE=demo DATABASE_PATH=./data/test.db EVAL_RESULTS_PATH=./data/eval_results.json python scripts/run_eval.py
 ```
 
-Keep changes covered: new behavior needs a matching test in `tests/`,
-and regression fixes should include the failing case as a test first.
+CI uses Python 3.12, a runner-temporary demo database, the test suite, and the full 150-question synthetic benchmark. It does not contact SEC. A passing demo benchmark is not evidence of live-source accuracy or semantic claim faithfulness; demo claims are intentionally not counted as SEC-verified.
 
 ## Project conventions
 
-- **Architecture**: schema models (`src/schemas` → `src/agents`) → storage and
-  retrieval (`src/storage`, `src/retrieval`) → agents (`src/agents`) →
-  orchestrator → API (`src/api`) → web templates (`src/web`). Each concern
-  stays in its own package; see [ARCHITECTURE.md](ARCHITECTURE.md).
-- **Honest scoping**: the corpus is a seeded demonstration dataset. Do not
-  describe demo numbers as live SEC EDGAR data in code, docs, or commits.
-- **No new hard dependencies for cross-cutting concerns**: logging,
-  metrics, and rate limiting are standard-library based. If a feature
-  genuinely needs a library, say so in the PR description.
-- **Claim verification**: claims only ever become VERIFIED when grounded in
-  indexed XBRL facts or financial filing text. Out-of-domain questions
-  yield UNVERIFIED claims — keep that invariant when touching the verifier.
-- **Style**: type hints on public functions, Pydantic models for anything
-  crossing a module boundary, and `logging.getLogger(__name__)` rather than
-  print statements.
+- **Keep layers focused:** Pydantic contracts in `src/schemas`; persistence in `src/storage`; ingestion in `src/ingestion`; retrieval in `src/retrieval`; pipeline steps in `src/agents`; HTTP and browser surface in `src/api` and `src/web`. See [architecture](docs/architecture.md).
+- **Preserve provenance:** never present demo-generated facts or passages as SEC evidence. Keep `data_source` consistent through storage, retrieval, citations, and reports.
+- **Fail honestly:** missing or ambiguous source data should remain unavailable/unverified rather than borrowing another ticker/period or inventing a claim.
+- **Avoid unnecessary dependencies:** current API metrics/rate limiting use the standard library. Explain the need when a new runtime dependency is justified.
+- **Use typed boundaries:** add type hints to public functions and Pydantic models for data crossing module boundaries.
+- **Use structured logging:** prefer `logging.getLogger(__name__)` over prints in application code.
+- **Test regressions:** add a focused test for corrected behavior; prefer fixtures and temporary paths over network calls or repository-root databases.
 
-## Submitting changes
+## Before opening a pull request
 
-1. Create a feature branch from `main`.
-2. Make the change small and focused — one behavior per PR.
-3. Run `python -m pytest tests/ -v` and `python scripts/run_eval.py` locally.
-4. Open a pull request describing the why, not just the what.
+1. Run tests and the demo benchmark with disposable paths.
+2. Review changed files, generated artifacts, and any database changes; do not include data files unless explicitly intended.
+3. Update documentation when public endpoints, configuration, operational behavior, or user-facing limitations change.
+4. Describe the motivation, behavior, evidence, and remaining limitations.
 
-CI runs the test suite and evaluation gates on every push; a PR is merged
-only when both are green.
+The project is currently a local/portfolio application, not an authenticated multi-user production service. See [limitations and future scope](docs/architecture.md#limitations-and-trust-boundaries) before proposing deployment-related work.
