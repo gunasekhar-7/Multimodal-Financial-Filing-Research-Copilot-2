@@ -1,15 +1,20 @@
-from typing import List
 from src.schemas.financial import SearchResultItem
-from src.schemas.reports import RiskFactorAnalysis, Citation
+from src.schemas.reports import Citation, RiskFactorAnalysis
+
 
 class FinancialAnalysisAgent:
     def __init__(self):
         pass
 
-    def analyze_risk_disclosures(self, chunks: List[SearchResultItem]) -> List[RiskFactorAnalysis]:
+    def analyze_risk_disclosures(
+        self, chunks: list[SearchResultItem]
+    ) -> list[RiskFactorAnalysis]:
         risk_analyses = []
         for item in chunks:
-            if "Risk Factors" in item.chunk.item_section or "risk" in item.chunk.content.lower():
+            if (
+                "Risk Factors" in item.chunk.item_section
+                or "risk" in item.chunk.content.lower()
+            ):
                 citation = Citation(
                     citation_id=f"cite-{item.chunk.chunk_id}",
                     ticker=item.chunk.ticker,
@@ -19,24 +24,18 @@ class FinancialAnalysisAgent:
                     page_number=item.chunk.page_number,
                     item_section=item.chunk.item_section,
                     source_url=item.chunk.source_url,
-                    excerpt=item.chunk.content[:180] + "..."
+                    excerpt=item.chunk.content[:180],
+                    data_source=item.chunk.data_source,
                 )
 
-                risk_analyses.append(RiskFactorAnalysis(
-                    category="Market & Regulatory Risk",
-                    risk_title="Evolution & Competition in Technology Infrastructure",
-                    description=item.chunk.content,
-                    trend="escalating" if "ai" in item.chunk.content.lower() else "stable",
-                    citations=[citation]
-                ))
-
-        if not risk_analyses:
-            risk_analyses.append(RiskFactorAnalysis(
-                category="General Operations",
-                risk_title="General Industry & Supply Chain Risks",
-                description="Macroeconomic volatility, foreign currency fluctuations, and global trade policies.",
-                trend="stable",
-                citations=[]
-            ))
+                risk_analyses.append(
+                    RiskFactorAnalysis(
+                        category="Market & Regulatory Risk",
+                        risk_title="Source-disclosed risk factors",
+                        description=item.chunk.content,
+                        trend="not_assessed",
+                        citations=[citation],
+                    )
+                )
 
         return risk_analyses

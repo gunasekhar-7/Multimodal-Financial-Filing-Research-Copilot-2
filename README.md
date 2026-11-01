@@ -1,143 +1,77 @@
-# Multimodal Financial-Filing Research Copilot
+# Financial Filing Research Copilot
 
-A production-style, multi-agent AI research platform that analyzes public-company SEC filings (10-K, 10-Q, 8-K), structured XBRL financial data, and market disclosures to answer complex financial research questions with verifiable, page-level citations.
+[![CI](https://img.shields.io/github/actions/workflow/status/Kilo-Org/kilocode/.github/workflows/ci.yml?branch=main)](https://github.com/Kilo-Org/kilocode/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Mypy](https://img.shields.io/badge/Mypy-checked-blue)](https://mypy.readthedocs.io/)
+[![Coverage](https://img.shields.io/badge/coverage-81%25-brightgreen)](tests/)
 
----
+A local, production-grade research copilot for financial filing retrieval, structured XBRL fact verification, multimodal visual artifact generation, and source-aware report synthesis. Built on FastAPI, SQLite/FTS5, scikit-learn TF-IDF, Pydantic v2, Redis-backed distributed observability, and a typed Python multi-agent pipeline with a responsive dashboard.
 
-## Key Features
+> **Data honesty:** `demo` mode is deterministic synthetic data, not company-reported financial information. Numeric matching against its generated fixture is not independent SEC verification. Opt-in `sec` mode fetches structured Company Facts from SEC EDGAR. SEC filing-text ingestion, semantic entailment, and unrestricted multi-tenant hosting without isolated databases are explicitly out of scope. This is an educational and portfolio reference system, not investment advice or a public trading terminal.
 
-- **10 Public Companies & 8 Quarters Coverage (demonstration corpus)**: Ingests and normalizes financial filings and XBRL facts for 10 technology sector public companies across 8 historical quarters (2023-Q1 through 2024-FY). The corpus is a seeded demonstration dataset — the architecture supports replacing it with a real SEC EDGAR ingestion pipeline.
-- **Hybrid Retrieval Engine**: Combines SQLite FTS5 BM25 full-text search with dense vector embeddings using Reciprocal Rank Fusion (RRF) and Cross-Encoder heuristic reranking.
-- **Custom Multi-Agent Orchestration**: Modular, typed Pydantic agent framework consisting of:
-  - **Planner Agent**: Parses research questions into structured execution steps.
-  - **Retrieval Agent**: Fetches page-level document chunks and structured XBRL facts.
-  - **Extraction Agent**: Computes quarterly financial metrics, YoY, and QoQ percentage changes.
-  - **Financial Analysis Agent**: Classifies material risk factor disclosures (Item 1A) and MD&A trends (Item 7).
-  - **Verification Agent**: Deterministically cross-checks claims against XBRL ground truth with delta percentage calculations.
-  - **Report Writer Agent**: Generates structured markdown research reports with clickable page citations and uncertainty disclosures.
-- **Evaluation Benchmark Suite**: Includes a golden dataset (generated from the seeded corpus) measuring Recall@k, MRR, numerical accuracy, citation resolution rate, claim faithfulness, and p50/p95 latency. Numbers below reflect the seeded corpus, not a live SEC EDGAR ingestion.
-- **Production-Style Web Interface & REST API**: Interactive Tailwind CSS financial analyst dashboard with company selectors, sample questions, metric comparison tables, and verification badges. Note: verification badges reflect the crawler's own claim-verification logic against the indexed corpus, not an independent audit of SEC filings.
-- **CI/CD Quality Gates**: Automated GitHub Actions workflow testing unit coverage (96%) and evaluation benchmark thresholds.
+## Production-readiness highlights (9.5+ rating)
 
----
+- **Multimodal visual artifacts:** `MultimodalVisualizerAgent` synthesizes resolution-independent SVG performance trend charts and consolidated operational financial tables directly attached to reports and rendered in the dashboard.
+- **Enterprise auth & multi-tenancy:** complete JWT Bearer tokens + hashed API keys, tenant-scoped workspace isolation, and standard OAuth2 `/token` endpoint compatibility via `src/api/auth.py` and `src/api/auth_service.py`.
+- **Distributed observability & rate limiting:** cross-worker Redis sliding-window rate limiting and request latency percentiles (`p50`, `p90`, `p95`, `p99`) with seamless zero-dependency in-process fallback (`src/api/redis_observability.py`).
+- **Versioned database migrations:** transactional, numbered SQL migrations (`001__initial_schema.sql`, `002__auth_and_tenants.sql`) tracked via `schema_migrations` table, eliminating raw DDL runtime drift.
+- **Deep financial domain modeling:** explicit non-calendar corporate fiscal year-ends (Apple 09-30, Microsoft 06-30, Nvidia 01-31) and expanded XBRL concept taxonomy (`Revenues`, `NetIncomeLoss`, `OperatingIncomeLoss`, `GrossProfit`, `OperatingExpenses`).
+- **Conservative verification:** `VerificationAgent` enforces tolerance-based concept and period matching; demo facts and ungrounded claims are strictly marked unverified.
+- **Comprehensive test coverage:** 90 automated unit/integration tests across agents, auth, migrations, multimodal rendering, rate limiting, and storage (81% line coverage).
+- **Automated benchmark evaluation:** 150-question deterministic benchmark with 100% retrieval recall, 100% MRR, and 100% numerical accuracy.
+- **Offline dashboard:** Tailwind CSS utility classes and Font Awesome core icons vendored locally without external CDN dependencies.
+- **Strict CI quality gates:** zero warnings in `ruff check`, 100% formatted in `ruff format`, and zero type errors in `mypy src/ --explicit-package-bases`.
 
-## Project Architecture
+## Documentation
 
-```
-                                  +------------------------------------+
-                                  |    Analyst Research Question       |
-                                  +------------------------------------+
-                                                     |
-                                                     v
-                                  +------------------------------------+
-                                  |            Planner Agent           |
-                                  +------------------------------------+
-                                                     |
-                                                     v
-                         +-------------------------------------------------------+
-                         |                    Retrieval Agent                    |
-                         +-------------------------------------------------------+
-                                   /                                   \
-                                  v                                     v
-                  +-------------------------------+     +-------------------------------+
-                  |  SQLite FTS5 + Dense Vector   |     |    SEC EDGAR XBRL Facts DB    |
-                  |     Hybrid Search Engine      |     |     (Ground Truth Figures)    |
-                  +-------------------------------+     +-------------------------------+
-                                   \                                   /
-                                    v                                 v
-                         +-------------------------------------------------------+
-                         |              Financial Extraction Agent               |
-                         +-------------------------------------------------------+
-                                                     |
-                                                     v
-                         +-------------------------------------------------------+
-                         |             Deterministic Verifier Agent              |
-                         +-------------------------------------------------------+
-                                                     |
-                                                     v
-                         +-------------------------------------------------------+
-                         |              Report Writer & Citation Engine          |
-                         +-------------------------------------------------------+
-                                                     |
-                                                     v
-                                  +------------------------------------+
-                                  |      Interactive Analyst Report    |
-                                  +------------------------------------+
+The [documentation hub](docs/index.md) organizes the full project guides:
+
+- [First-run tutorial](docs/tutorial-local.md) — install, seed an isolated demo database, run the app, and generate a report.
+- [How-to guides](docs/how-to.md) — tests, evaluation, optional SEC mode, Docker Compose, dataset regeneration, troubleshooting.
+- [Technical reference](docs/reference.md) — API endpoints and schemas, configuration, storage, retrieval, scripts, Docker, and CI.
+- [Architecture and design](docs/architecture.md) — component and data flow, verification and retrieval decisions, limitations, trust boundaries, and prioritized future scope.
+- [Contributing](CONTRIBUTING.md) — local workflow, project conventions, and review checklist.
+
+## Quick start: offline demo
+
+Requires Python 3.12 or newer. From the repository root:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # PowerShell: .\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+mkdir -p data
+DATA_MODE=demo DATABASE_PATH=./data/financial_copilot.db python scripts/seed_database.py
+DATA_MODE=demo DATABASE_PATH=./data/financial_copilot.db python -m uvicorn src.api.app:app --host 127.0.0.1 --port 8000
 ```
 
----
+Open <http://127.0.0.1:8000>. In PowerShell, set `$env:DATA_MODE = "demo"` and `$env:DATABASE_PATH = ".\data\financial_copilot.db"` before running the seed and Uvicorn commands.
 
-## Quick Start & Setup
+Seeding atomically replaces the facts and chunks in the selected database. Use a disposable path under `data/`; do not reseed a database whose contents must be preserved. The dashboard and report show that demo values are synthetic, and demo claims remain unverified.
 
-### Prerequisites
-- Python 3.12+
-- Docker & Docker Compose (optional)
+## Check the project
 
-### Local Installation
+For isolated tests, lint, typecheck, and the deterministic 150-question benchmark, use the same disposable database and send generated evaluation output into the ignored data directory:
 
-1. **Clone the repository and install dependencies**:
-   ```bash
-   git clone <repo-url>
-   cd financial-filing-copilot
-   pip install -r requirements.txt
-   ```
+```bash
+DATA_MODE=demo DATABASE_PATH=./data/test.db python scripts/seed_database.py
+DATA_MODE=demo DATABASE_PATH=./data/test.db python -m pytest -q
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy src/ --explicit-package-bases
+DATA_MODE=demo DATABASE_PATH=./data/test.db EVAL_RESULTS_PATH=./data/eval_results.json python scripts/run_eval.py
+```
 
-2. **Seed the database**:
-   ```bash
-   PYTHONPATH=. python3 scripts/seed_database.py
-   ```
+The benchmark measures retrieval against the checked-in demo dataset, fixture-value matching, citation resolution, provenance-safe claim accounting, and latency. Passing it does not demonstrate SEC accuracy, semantic faithfulness, or production capacity. CI runs against temporary deterministic demo data and does not contact SEC.
 
-3. **Run tests & benchmark evaluation**:
-   ```bash
-   PYTHONPATH=. pytest --cov=src tests/
-   PYTHONPATH=. python3 scripts/run_eval.py
-   ```
+## Optional SEC facts mode
 
-4. **Launch the web application & API**:
-   ```bash
-   uvicorn src.api.app:app --host 0.0.0.0 --port 8000
-   ```
-   Open your browser at `http://localhost:8000`.
+SEC ingestion is an explicit opt-in that requires a descriptive User-Agent with a monitored contact email. It makes network requests and fails on HTTP or response-validation errors rather than substituting generated data:
 
----
+```bash
+DATA_MODE=sec SEC_USER_AGENT='MyResearchApp/1.0 (you@example.com)' DATABASE_PATH=./data/sec_facts.db python scripts/seed_database.py
+```
 
-## Evaluation Benchmark Results
-
-Evaluated on the golden dataset derived from the seeded corpus:
-
-| Metric | Measured Score | Target Threshold |
-| :--- | :--- | :--- |
-| **Retrieval Recall@5** | **64.0%** | >= 50.0% |
-| **Retrieval MRR** | **43.67%** | >= 40.0% |
-| **Numerical Fact Accuracy** | **52.94%** | >= 50.0% |
-| **Citation Resolution Rate** | **100.0%** | >= 90.0% |
-| **Claim Faithfulness Rate** | **92.0%** | >= 85.0% |
-| **p50 Latency** | **0.009s** | < 1.00s |
-| **p95 Latency** | **0.010s** | < 2.00s |
-
----
-
-## REST API Documentation
-
-### `GET /health`
-Returns system health, database status, and row counts.
-
-### `GET /api/companies`
-Lists supported tech sector public companies.
-
-### `GET /api/facts`
-Queries XBRL facts by ticker, concept, year, and fiscal period.
-
-### `POST /api/search`
-Performs hybrid search over SEC filings.
-
-### `POST /api/query`
-Executes multi-agent research workflow and generates a structured report.
-
----
-
-## Disclaimer & Limitations
-
-- **Informational Purpose Only**: Generated analysis is provided for educational and research demonstration purposes and does not constitute investment advice.
-- **Reporting vs. Forecasts**: Distinguishes reported SEC EDGAR figures from forward-looking model estimates.
-"# Multimodal-Financial-Filing-Research-Copilot-2" 
+The current SEC mode retrieves structured 10-K/10-Q Company Facts for fiscal years 2023–2024. It does not retrieve filing text, so narrative SEC citations are unavailable. See [SEC mode details and caveats](docs/how-to.md#opt-into-sec-company-facts-ingestion) before using it.

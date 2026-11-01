@@ -4,10 +4,11 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    DATA_MODE=demo \
+    DATABASE_PATH=/app/data/financial_copilot.db
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
     curl \
     sqlite3 \
     && rm -rf /var/lib/apt/lists/*
@@ -17,8 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Seed initial database
-RUN python3 scripts/seed_database.py
+# Create persistent-data location and seed deterministic offline demo data.
+RUN mkdir -p /app/data && python3 scripts/seed_database.py
 
 EXPOSE 8000
 

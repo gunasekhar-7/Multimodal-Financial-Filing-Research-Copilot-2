@@ -1,39 +1,155 @@
-from typing import List, Optional, Tuple
-from src.schemas.financial import XBRLFact, SearchResultItem
-from src.schemas.reports import VerifiedClaim, ClaimVerificationStatus, Citation
+import logging
 import re
+
+from sklearn.feature_extraction.text import TfidfVectorizer  # type: ignore
+from sklearn.metrics.pairwise import cosine_similarity  # type: ignore
+
+from src.schemas.financial import DataSource, SearchResultItem, XBRLFact
+from src.schemas.reports import Citation, ClaimVerificationStatus, VerifiedClaim
+
+logger = logging.getLogger(__name__)
+
+# Cosine similarity threshold above which a qualitative claim is considered
+# semantically entailed by its source passage.
+QUALITATIVE_SIMILARITY_THRESHOLD = 0.45
+
+# Max qualitative claims to evaluate per query.
+MAX_QUALITATIVE_CLAIMS = 3
+
+
+def _semantic_similarity(text_a: str, text_b: str) -> float:
+    """TF-IDF cosine similarity between two texts (0.0 to 1.0)."""
+    if not text_a or not text_b:
+        return 0.0
+    try:
+        vectorizer = TfidfVectorizer(stop_words="english", max_features=5000)
+        tfidf = vectorizer.fit_transform([text_a, text_b])
+        sim = cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0]
+        return float(sim)
+    except (ValueError, TypeError, KeyError):
+        return 0.0
+
 
 # Token-sets that make a question a *financial* question (grounded in
 # SEC filing concepts) as opposed to a general or out-of-domain question.
 FINANCIAL_QUESTION_SIGNALS = {
-    "revenue", "income", "eps", "profit", "earnings", "margin",
-    "cash", "asset", "assets", "liability", "liabilities", "equity",
-    "fiscal", "quarter", "filing", "filings", "disclosure",
-    "disclosures", "risk", "risks", "loss", "gain", "dividend", "dividends",
-    "operating", "gross", "net", "balance", "liquidity", "roi",
-    "investment", "investments", "investing", "strategic", "strategy",
-    "mda", "guidance", "outlook", "segments", "expenses", "expenditure",
+    "revenue",
+    "income",
+    "eps",
+    "profit",
+    "earnings",
+    "margin",
+    "cash",
+    "asset",
+    "assets",
+    "liability",
+    "liabilities",
+    "equity",
+    "fiscal",
+    "quarter",
+    "filing",
+    "filings",
+    "disclosure",
+    "disclosures",
+    "risk",
+    "risks",
+    "loss",
+    "gain",
+    "dividend",
+    "dividends",
+    "operating",
+    "gross",
+    "net",
+    "balance",
+    "liquidity",
+    "roi",
+    "investment",
+    "investments",
+    "investing",
+    "strategic",
+    "strategy",
+    "mda",
+    "guidance",
+    "outlook",
+    "segments",
+    "expenses",
+    "expenditure",
 }
 
 # Tokens / substrings that make a retrieved chunk legitimate financial
 # ground-truth material for anchoring a qualitative claim.
 FINANCIAL_CONTENT_SIGNALS = [
-    "revenue", "net income", "eps", "gross profit", "operating income",
-    "fiscal period", "quarter", "filing", "sec edgar", "item 7",
-    "item 8", "mda", "market risk", "item 1a", "risk factor",
-    "consolidated statement", "balance sheet", "cash flow",
-    "cost of goods sold", "gross margin", "operating expenses",
-    "quarterly", "fiscal year", "annual report", "financial condition",
+    "revenue",
+    "net income",
+    "eps",
+    "gross profit",
+    "operating income",
+    "fiscal period",
+    "quarter",
+    "filing",
+    "sec edgar",
+    "item 7",
+    "item 8",
+    "mda",
+    "market risk",
+    "item 1a",
+    "risk factor",
+    "consolidated statement",
+    "balance sheet",
+    "cash flow",
+    "cost of goods sold",
+    "gross margin",
+    "operating expenses",
+    "quarterly",
+    "fiscal year",
+    "annual report",
+    "financial condition",
 ]
 
 # Question patterns → XBRL concept the question is most plausibly asking
 # about. Order matters: "net income" must be checked before the generic
 # "income" term; revenue is the default.
 CONCEPT_PATTERNS = [
-    ("NetIncomeLoss", re.compile(r"\bnet\s+income\b|\bnet\s+(profit|profits|earnings)\b", re.IGNORECASE)),
-    ("EarningsPerShareDiluted", re.compile(r"\bearnings\s+per\s+share\b|\bdiluted\s+eps\b|\beps\b", re.IGNORECASE)),
-    ("Revenues", re.compile(r"\brevenue|\brevenues\b|\bsales\b|\btop\s+line\b", re.IGNORECASE)),
+    (
+        "NetIncomeLoss",
+        re.compile(
+            r"\bnet\s+income\b|\bnet\s+(profit|profits|earnings)\b", re.IGNORECASE
+        ),
+    ),
+    (
+        "EarningsPerShareDiluted",
+        re.compile(
+            r"\bearnings\s+per\s+share\b|\bdiluted\s+eps\b|\beps\b", re.IGNORECASE
+        ),
+    ),
+    (
+        "OperatingIncomeLoss",
+        re.compile(r"\boperating\s+(income|profit|earnings)\b", re.IGNORECASE),
+    ),
+    (
+        "GrossProfit",
+        re.compile(r"\bgross\s+profit\b|\bgross\s+margin\b", re.IGNORECASE),
+    ),
+    (
+        "OperatingExpenses",
+        re.compile(r"\boperating\s+expenses\b|\bopex\b", re.IGNORECASE),
+    ),
+    (
+        "Revenues",
+        re.compile(r"\brevenue|\brevenues\b|\bsales\b|\btop\s+line\b", re.IGNORECASE),
+    ),
 ]
+
+
+def _format_concept_readable(concept: str) -> str:
+    """Convert an XBRL concept into plain English."""
+    return (
+        concept.replace("NetIncomeLoss", "net income")
+        .replace("EarningsPerShareDiluted", "EPS")
+        .replace("OperatingIncomeLoss", "operating income")
+        .replace("GrossProfit", "gross profit")
+        .replace("OperatingExpenses", "operating expenses")
+    )
 
 
 def _detect_concept(question: str) -> str:
@@ -48,12 +164,11 @@ def _query_touches_financial_concept(question: str) -> bool:
     """Does the question ask about something that SEC filings actually carry
     financial-ground-truth for? Non-financial questions should not produce
     all-VERIFIED claim sets."""
-    import re
-    tokens = set(re.findall(r'\b\w+\b', question.lower()))
+    tokens = set(re.findall(r"\b\w+\b", question.lower()))
     return bool(tokens & FINANCIAL_QUESTION_SIGNALS)
 
 
-def _unverified_claims_outside_domain(question: str) -> List[VerifiedClaim]:
+def _unverified_claims_outside_domain(question: str) -> list[VerifiedClaim]:
     """Produce the single UNVERIFIED claim for out-of-domain questions.
 
     A question that touches no financial concept tracked in the SEC EDGAR /
@@ -78,7 +193,7 @@ def _unverified_claims_outside_domain(question: str) -> List[VerifiedClaim]:
     ]
 
 
-def _parse_requested_period(question: str) -> Tuple[Optional[int], Optional[str]]:
+def _parse_requested_period(question: str) -> tuple[int | None, str | None]:
     """Extract the (fiscal_year, fiscal_period) a question explicitly asks
     about, e.g. "Q1 2024" -> (2024, "Q1"), "fiscal year 2023" -> (2023, None).
 
@@ -93,7 +208,10 @@ def _parse_requested_period(question: str) -> Tuple[Optional[int], Optional[str]
         quarter = f"Q{q_token.group(1)}"
     else:
         spelled = {
-            "first": "Q1", "second": "Q2", "third": "Q3", "fourth": "Q4",
+            "first": "Q1",
+            "second": "Q2",
+            "third": "Q3",
+            "fourth": "Q4",
         }
         s_match = re.search(
             r"\b(first|second|third|fourth)\s+quarter\b", text, re.IGNORECASE
@@ -111,53 +229,119 @@ def _parse_requested_period(question: str) -> Tuple[Optional[int], Optional[str]
     return year, quarter
 
 
-def _select_revenue_fact(
-    facts: List[XBRLFact],
-    year: Optional[int],
-    quarter: Optional[str],
-    concept: str = "Revenues",
-) -> Optional[XBRLFact]:
-    """Pick the fact that best matches the question's concept and requested
-    period, with a well-defined degradation order:
+def _select_exact_fact(
+    facts: list[XBRLFact],
+    concept: str,
+    year: int | None,
+    quarter: str | None,
+) -> XBRLFact | None:
+    """Pick the fact that exactly matches concept + year + quarter.
 
-    1. exact year + quarter match for the concept
-    2. requested year for the concept, preferring annual (FY), then latest quarter
-    3. concept's latest FY-2024 fact
-    4. concept's latest available fact of any period
+    Returns the single matching fact, or None when no exact match exists.
+    An explicitly requested period must never silently degrade to a
+    different period — that would produce a false verification.
     """
     concept_facts = [f for f in facts if f.concept == concept]
     if not concept_facts:
         return None
 
     if year is not None and quarter is not None:
-        exact = [f for f in concept_facts if f.fiscal_year == year and f.fiscal_period == quarter]
-        if exact:
-            return exact[-1]
-        # An explicit quarter must not silently degrade to an annual or other
-        # quarter value; return no fact so the caller reports it as unverified.
-        return None
+        exact = [
+            f
+            for f in concept_facts
+            if f.fiscal_year == year and f.fiscal_period == quarter
+        ]
+        if len(exact) == 1:
+            return exact[0]
+        return None  # no exact match, or ambiguous (handled by caller)
 
-    if year is not None:
+    if year is not None and quarter is None:
         same_year = [f for f in concept_facts if f.fiscal_year == year]
-        if same_year:
-            annual = [f for f in same_year if f.fiscal_period == "FY"]
-            if annual:
-                return annual[-1]
-            quarters = [f for f in same_year if re.fullmatch(r"Q[1-4]", f.fiscal_period)]
-            if quarters:
-                latest_q = max(quarters, key=lambda f: int(f.fiscal_period[1:])).fiscal_period
-                return [f for f in quarters if f.fiscal_period == latest_q][-1]
-
-    if year is not None:
-        # A request for a specific year must not return a different year's
-        # value when that year is absent from the indexed corpus.
+        if not same_year:
+            return None
+        annual = [f for f in same_year if f.fiscal_period == "FY"]
+        if annual:
+            return annual[0] if len(annual) == 1 else None
+        quarters = [f for f in same_year if re.fullmatch(r"Q[1-4]", f.fiscal_period)]
+        if quarters:
+            latest_q = max(quarters, key=lambda f: int(f.fiscal_period[1:]))
+            matching_q = [
+                f for f in quarters if f.fiscal_period == latest_q.fiscal_period
+            ]
+            return matching_q[0] if len(matching_q) == 1 else None
         return None
 
-    fy2024 = [f for f in concept_facts if f.fiscal_year == 2024 and f.fiscal_period == "FY"]
+    # No year specified: prefer latest FY 2024, then latest available.
+    fy2024 = [
+        f for f in concept_facts if f.fiscal_year == 2024 and f.fiscal_period == "FY"
+    ]
     if fy2024:
-        return fy2024[-1]
+        return fy2024[0] if len(fy2024) == 1 else None
+    return max(concept_facts, key=lambda f: (f.fiscal_year, f.fiscal_period))
 
-    return sorted(concept_facts, key=lambda f: (f.fiscal_year, f.fiscal_period))[-1]
+
+def _has_ambiguous_facts(
+    facts: list[XBRLFact],
+    concept: str,
+    year: int | None,
+    quarter: str | None,
+) -> bool:
+    """Return True when multiple facts match the same concept/ticker/period
+    with different values — the claim cannot be uniquely verified."""
+    concept_facts = [f for f in facts if f.concept == concept]
+    if year is not None and quarter is not None:
+        exact = [
+            f
+            for f in concept_facts
+            if f.fiscal_year == year and f.fiscal_period == quarter
+        ]
+        if len(exact) > 1:
+            values = {f.value for f in exact}
+            return len(values) > 1
+    return False
+
+
+def _build_citation(
+    fact: XBRLFact,
+    chunks: list[SearchResultItem],
+) -> list[Citation]:
+    """Build a citation from a retrieved chunk matching the fact's ticker,
+    fiscal year, fiscal period, and data source. Returns an empty list when
+    no matching source passage exists — SEC facts without filing-text
+    context cannot be promoted to VERIFIED claims."""
+    matching_chunks = [
+        c
+        for c in chunks
+        if c.chunk.ticker == fact.ticker
+        and c.chunk.fiscal_year == fact.fiscal_year
+        and c.chunk.fiscal_period == fact.fiscal_period
+        and c.chunk.data_source == fact.data_source
+    ]
+    if not matching_chunks:
+        return []
+    top_c = matching_chunks[0].chunk
+    return [
+        Citation(
+            citation_id=f"cite-{top_c.chunk_id}",
+            ticker=top_c.ticker,
+            filing_type=top_c.filing_type.value,
+            fiscal_year=top_c.fiscal_year,
+            fiscal_period=top_c.fiscal_period,
+            page_number=top_c.page_number,
+            item_section=top_c.item_section,
+            source_url=top_c.source_url,
+            excerpt=top_c.content[:200],
+            data_source=top_c.data_source,
+        )
+    ]
+
+
+def _magnitude(fact: XBRLFact) -> str:
+    """Unit-aware presentation: per-share metrics are quoted directly;
+    USD amounts are scaled to millions for readability."""
+    if fact.unit == "USD":
+        return f"${fact.value / 1_000_000.0:,.2f} million"
+    return f"{fact.value:,.2f} {fact.unit}"
 
 
 class VerificationAgent:
@@ -167,9 +351,11 @@ class VerificationAgent:
     def verify_claims(
         self,
         question: str,
-        facts: List[XBRLFact],
-        chunks: List[SearchResultItem],
-    ) -> List[VerifiedClaim]:
+        facts: list[XBRLFact],
+        chunks: list[SearchResultItem],
+        target_tickers: list[str] | None = None,
+        tolerance_pct: float = 0.01,
+    ) -> list[VerifiedClaim]:
         """Verify claims against SEC EDGAR XBRL ground truth.
 
         Produces at least one non-VERIFIED claim for questions whose answer
@@ -177,128 +363,170 @@ class VerificationAgent:
         "What is the moon made of?"). A purely qualitative question about the
         company is still grounded when retrieved chunks carry financial
         content; an out-of-domain question is not.
+
+        Verification rules:
+        - Demo data: exact fixture match → UNVERIFIED (synthetic, not SEC-reported)
+        - SEC data + matching citation → VERIFIED
+        - SEC data without citation → UNVERIFIED (no filing-text context)
+        - No exact fact match → UNVERIFIED (never borrow another period)
+        - Multiple conflicting facts → AMBIGUOUS
         """
-        verified_claims: List[VerifiedClaim] = []
+        verified_claims: list[VerifiedClaim] = []
         query_touches_finance = _query_touches_financial_concept(question)
 
-
-
         # --- Out-of-domain questions: produce only UNVERIFIED claims ---
-        # If the question does not ask about a financial concept tracked
-        # in the SEC EDGAR / XBRL corpus, no VERIFIED claim can be grounded.
         if not query_touches_finance:
             return _unverified_claims_outside_domain(question)
 
-
-        # --- Numerical claim: concept figure for the requested window ----
-        # Honors both the XBRL concept the question asks about and the
-        # fiscal year / quarter the question explicitly names.
+        # --- Numerical claim: exact concept + period match against XBRL ----
+        selected_tickers = set(target_tickers or ()) | {
+            chunk.chunk.ticker for chunk in chunks
+        }
+        matching_facts = [
+            fact
+            for fact in facts
+            if not selected_tickers or fact.ticker in selected_tickers
+        ]
         concept = _detect_concept(question)
         req_year, req_quarter = _parse_requested_period(question)
-        f = _select_revenue_fact(facts, req_year, req_quarter, concept=concept)
 
-        if f is not None:
-            cites: List[Citation] = []
-            yearly = [
-                c
-                for c in chunks
-                if c.chunk.ticker == f.ticker and c.chunk.fiscal_year == f.fiscal_year
-            ]
-            # Prefer a citation from the same fiscal period as the fact,
-            # falling back to any chunk of that fiscal year.
-            matching_chunks = (
-                [c for c in yearly if c.chunk.fiscal_period == f.fiscal_period]
-                or yearly
-            )
-            if matching_chunks:
-                top_c = matching_chunks[0].chunk
-                cites.append(
-                    Citation(
-                        citation_id=f"cite-{top_c.chunk_id}",
-                        ticker=top_c.ticker,
-                        filing_type=top_c.filing_type.value,
-                        fiscal_year=top_c.fiscal_year,
-                        fiscal_period=top_c.fiscal_period,
-                        page_number=top_c.page_number,
-                        item_section=top_c.item_section,
-                        source_url=top_c.source_url,
-                        excerpt=top_c.content[:200],
-                    )
-                )
-
-            # Unit-aware presentation: per-share metrics are quoted directly;
-            # USD amounts are scaled to millions for readability.
-            if f.unit == "USD":
-                magnitude = f"${f.value / 1_000_000.0:,.2f} million"
-            else:
-                magnitude = f"{f.value:,.2f} {f.unit}"
-
-            label = f.label if f.label else concept
+        if _has_ambiguous_facts(matching_facts, concept, req_year, req_quarter):
+            concept_readable = _format_concept_readable(concept)
             verified_claims.append(
                 VerifiedClaim(
                     claim_id=f"claim-num-{concept.lower()}",
                     claim_text=(
-                        f"{f.entity_name} ({f.ticker}) reported {label.lower()} of "
-                        f"{magnitude} for {f.fiscal_period} {f.fiscal_year}."
-                    ),
-                    numerical_value=f.value,
-                    expected_xbrl_value=f.value,
-                    status=ClaimVerificationStatus.VERIFIED,
+                        f"Multiple conflicting {concept_readable} values exist for "
+                        f"{req_quarter or ''} {req_year or ''}; cannot uniquely verify."
+                    ).strip(),
+                    numerical_value=None,
+                    expected_xbrl_value=None,
+                    status=ClaimVerificationStatus.AMBIGUOUS,
                     verification_notes=(
-                        f"Numerically verified against SEC EDGAR XBRL fact "
-                        f"'{f.concept}' (unit: {f.unit}). Delta: 0.00%."
+                        f"More than one {concept} XBRL fact matches the requested "
+                        "ticker and period with differing values. Claim is ambiguous."
                     ),
-                    citations=cites,
                 )
             )
         else:
-            concept_readable = concept.replace('NetIncomeLoss', 'net income').replace('EarningsPerShareDiluted', 'EPS')
-            verified_claims.append(
-                VerifiedClaim(
-                    claim_id="claim-num-unverified",
-                    claim_text=(
-                        f"Information for the requested {concept_readable} "
-                        "period is not available in the indexed corpus."
-                    ),
-                    numerical_value=None,
-                    expected_xbrl_value=None,
-                    status=ClaimVerificationStatus.UNVERIFIED,
-                    verification_notes=(
-                        f"No {concept} XBRL facts found in the current document corpus. "
-                        "Cannot verify the numerical claim without ground-truth data."
-                    ),
+            f = _select_exact_fact(matching_facts, concept, req_year, req_quarter)
+            if f is not None:
+                cites = _build_citation(f, chunks)
+
+                # Determine verification status by data source and citation presence.
+                if f.data_source.value == "sec_edgar":
+                    if cites:
+                        claim_status = ClaimVerificationStatus.VERIFIED
+                        verification_note = (
+                            "Matched SEC EDGAR structured XBRL fact; cited "
+                            "filing-text context is not available in SEC mode."
+                        )
+                    else:
+                        claim_status = ClaimVerificationStatus.UNVERIFIED
+                        verification_note = (
+                            "The structured value was found, but no matching "
+                            "source passage was retrieved. It is not promoted "
+                            "as a cited finding."
+                        )
+                else:
+                    # Demo data is never SEC-verified, even when numerically exact.
+                    claim_status = ClaimVerificationStatus.UNVERIFIED
+                    verification_note = "This generated demo value is synthetic and is not SEC-reported."
+
+                magnitude = _magnitude(f)
+                label = f.label if f.label else concept
+                period_text = f"{f.fiscal_period} {f.fiscal_year}"
+                verified_claims.append(
+                    VerifiedClaim(
+                        claim_id=f"claim-num-{concept.lower()}",
+                        claim_text=(
+                            f"{f.entity_name} ({f.ticker}) reported {label.lower()} of "
+                            f"{magnitude} for {period_text}."
+                        ),
+                        numerical_value=f.value,
+                        expected_xbrl_value=f.value,
+                        status=claim_status,
+                        verification_notes=verification_note,
+                        citations=cites,
+                    )
                 )
-            )
+            else:
+                concept_readable = _format_concept_readable(concept)
+                period_text = f"{req_quarter or ''} {req_year or ''}".strip()
+                verified_claims.append(
+                    VerifiedClaim(
+                        claim_id="claim-num-unverified",
+                        claim_text=(
+                            f"Information for the requested {concept_readable} "
+                            f"period is not available in the indexed corpus."
+                        ).strip(),
+                        numerical_value=None,
+                        expected_xbrl_value=None,
+                        status=ClaimVerificationStatus.UNVERIFIED,
+                        verification_notes=(
+                            f"No {concept} XBRL facts found for {period_text} "
+                            "in the current document corpus. Cannot verify the "
+                            "numerical claim without ground-truth data."
+                        ),
+                    )
+                )
 
         # --- Qualitative claim -------------------------------------------
-        # A qualitative "strategic expansion" claim can only be VERIFIED when
-        # (a) the question is actually a financial one, and (b) the retrieved
-        # chunks include financial ground-truth material. Out-of-domain
-        # questions (e.g. "What is the moon made of?") always yield an
-        # UNVERIFIED qualitative claim (handled above).
-        best_chunk: Optional[SearchResultItem.chunk] = None
+        # Use TF-IDF cosine similarity to check whether a source passage
+        # semantically entails the claim. Above-threshold similarity → VERIFIED;
+        # below-threshold → UNVERIFIED with source context. Demo data stays
+        # UNVERIFIED regardless (synthetic, not SEC-reported).
+        best_chunk = None
+        best_similarity = 0.0
         for c in sorted(chunks, key=lambda x: x.score, reverse=True):
             content = c.chunk.content.lower()
-            if any(sig in content for sig in FINANCIAL_CONTENT_SIGNALS):
+            if not any(sig in content for sig in FINANCIAL_CONTENT_SIGNALS):
+                continue
+            sim = _semantic_similarity(question, c.chunk.content)
+            if sim > best_similarity:
+                best_similarity = sim
                 best_chunk = c.chunk
-                break
 
         if best_chunk:
+            excerpt_claim = next(
+                (
+                    sentence.strip()
+                    for sentence in re.split(r"(?<=[.!?])\s+", best_chunk.content)
+                    if sentence.strip()
+                ),
+                best_chunk.content.strip(),
+            )
+
+            # Demo data is never SEC-verified.
+            if best_chunk.data_source == DataSource.DEMO:
+                claim_status = ClaimVerificationStatus.UNVERIFIED
+                verification_note = (
+                    "Qualitative claim quoted from synthetic demo text; "
+                    "not SEC-reported."
+                )
+            elif best_similarity >= QUALITATIVE_SIMILARITY_THRESHOLD:
+                claim_status = ClaimVerificationStatus.VERIFIED
+                verification_note = (
+                    f"Qualitative claim semantically entailed by retrieved "
+                    f"source passage (TF-IDF cosine similarity {best_similarity:.2f} "
+                    f">= {QUALITATIVE_SIMILARITY_THRESHOLD})."
+                )
+            else:
+                claim_status = ClaimVerificationStatus.UNVERIFIED
+                verification_note = (
+                    f"Qualitative claim not sufficiently entailed by retrieved "
+                    f"source passage (TF-IDF cosine similarity {best_similarity:.2f} "
+                    f"< {QUALITATIVE_SIMILARITY_THRESHOLD}). Treat as source context."
+                )
+
             verified_claims.append(
                 VerifiedClaim(
                     claim_id="claim-qualitative-1",
-                    claim_text=(
-                        f"{best_chunk.ticker} continues strategic expansion in "
-                        "technology infrastructure and artificial intelligence "
-                        "applications."
-                    ),
+                    claim_text=excerpt_claim,
                     numerical_value=None,
                     expected_xbrl_value=None,
-                    status=ClaimVerificationStatus.VERIFIED,
-                    verification_notes=(
-                        "Qualitative claim grounded directly in cited Item 7 / MD&A "
-                        "disclosure."
-                    ),
+                    status=claim_status,
+                    verification_notes=verification_note,
                     citations=[
                         Citation(
                             citation_id=f"cite-{best_chunk.chunk_id}",
@@ -310,6 +538,7 @@ class VerificationAgent:
                             item_section=best_chunk.item_section,
                             source_url=best_chunk.source_url,
                             excerpt=best_chunk.content[:200],
+                            data_source=best_chunk.data_source,
                         )
                     ],
                 )
@@ -318,16 +547,12 @@ class VerificationAgent:
             verified_claims.append(
                 VerifiedClaim(
                     claim_id="claim-qualitative-unverified",
-                    claim_text=(
-                        "Strategic expansion and AI investments claim could not be "
-                        "grounded in the retrieved corpus."
-                    ),
+                    claim_text="No source-backed qualitative finding was available in the retrieved corpus.",
                     numerical_value=None,
                     expected_xbrl_value=None,
                     status=ClaimVerificationStatus.UNVERIFIED,
                     verification_notes=(
-                        "No financial ground-truth chunk (Item 7 / Item 8 / Item 1A / "
-                        "XBRL financial text) retrieved for this question."
+                        "No relevant source passage was retrieved for this question."
                     ),
                 )
             )
